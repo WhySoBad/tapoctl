@@ -18,7 +18,7 @@ pub enum Commands {
     Devices,
     /// Start the grpc server
     Serve {
-        #[arg(value_parser = clap::value_parser!(u16).range(1..65535), default_value_t = 19191)]
+        #[arg(value_parser = clap::value_parser!(u16).range(1..=65535), default_value_t = 19191)]
         port: u16
     },
     /// Update properties of a device
@@ -27,19 +27,23 @@ pub enum Commands {
         device: String,
 
         /// New brightness value
-        #[arg(value_parser = clap::value_parser!(u8).range(1..100), long, short)]
+        #[arg(value_parser = clap::value_parser!(u8).range(1..=100), long, short)]
         brightness: Option<u8>,
 
         #[command(flatten)]
         hue_saturation: HueSaturation,
 
         /// New color temperature
-        #[arg(value_parser = clap::value_parser!(u16).range(2500..6500), long, short)]
+        #[arg(value_parser = clap::value_parser!(u16).range(2500..=6500), long, short)]
         temperature: Option<u16>,
 
         /// Use predefined google home color (as PascalCase name)
         #[arg(long, short, value_parser = valid_color)]
-        color: Option<Color>
+        color: Option<Color>,
+
+        /// Turn device on or off
+        #[arg(long, short)]
+        power: Option<bool>
     },
     /// Print information about a device
     Info {
@@ -76,12 +80,12 @@ pub enum Commands {
 #[group(multiple = true, requires_all = ["hue", "saturation"])]
 pub struct HueSaturation {
     /// New hue value
-    #[arg(value_parser = clap::value_parser!(u16).range(1..360), long, short_alias = 'u')]
-    hue: Option<u16>,
+    #[arg(value_parser = clap::value_parser!(u16).range(1..=360), long, short_alias = 'u')]
+    pub hue: Option<u16>,
 
     /// New saturation value
-    #[arg(value_parser = clap::value_parser!(u8).range(1..100), long, short)]
-    saturation: Option<u8>,
+    #[arg(value_parser = clap::value_parser!(u8).range(1..=100), long, short)]
+    pub saturation: Option<u8>,
 }
 
 

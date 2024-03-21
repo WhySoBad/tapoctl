@@ -160,10 +160,23 @@ impl Tapo for TapoService {
         Ok(Response::new(EmptyResponse {}))
     }
 
-    async fn set(&self, request: Request<SetRequest>) -> Result<Response<EmptyResponse>, Status> {
+    async fn set(&self, request: Request<SetRequest>) -> Result<Response<InfoResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device)?;
         let color = inner.color.map(|_| transform_color(inner.color()));
+        let temperature = inner.temperature.map(|t| u16::try_from(t).map_err(|_| Status::invalid_argument("Temperature has to be unsigned 16-bit integer")));
+
+        let temperature = match temperature {
+            Some(res) => Some(res?),
+            None => None
+        };
+
+        if let Some(temperature) = temperature {
+            if !(2500..=6500).contains(&temperature) {
+                Err(Status::invalid_argument("Temperature has to be in range 2500 to 6500"))?
+            }
+        }
+
 
         let hue_saturation: Option<Result<(u16, u8), Status>> = inner.hue_saturation.map(|hs| {
             let hue = u16::try_from(hs.hue).map_err(|_| Status::invalid_argument("Hue has to be unsigned 16-bit integer"))?;
@@ -187,16 +200,38 @@ impl Tapo for TapoService {
             }
         }
 
-        // let temperature = u16::try_from(inner.temperature).map_err(|_| Status::invalid_argument("Temperature has to be unsigned 16-bit integer"))?
+        let brightness = inner.brightness.map(|b| u8::try_from(b).map_err(|_| Status::invalid_argument("Brightness has to be unsigned 8-bit integer")));
 
-        // if !(2500..=6500).contains(&temperature) {
-        //     Err(Status::invalid_argument("Temperature has to be in range 2500 to 6500"))?
-        // }
-        // let brightness = u8::try_from(inner.brightness).map_err(|_| Status::invalid_argument("Brightness has to be unsigned 8-bit integer"))?;
+        let brightness = match brightness {
+            Some(res) => Some(res?),
+            None => None
+        };
 
-        // if !(1..=100).contains(&brightness) {
-        //    Err(Status::invalid_argument("Brightness has to be in range 1 to 100"))?
-        // }
-        todo!()
+        if let Some(brightness) = brightness {
+            if !(1..=100).contains(&brightness) {
+                Err(Status::invalid_argument("Brightness has to be in range 1 to 100"))?
+            }
+        }
+
+        match &device.handler {
+            device::DeviceHandler::ColorLight(handler) => {
+                let mut set = handler.set();
+                if let Some(brightness) = brightness {
+                    set = set.brightness(brightness);
+                };
+                if let Some(color) = color {
+                    set = set.color(color);
+                };
+                if let Some((hue, saturation)) = hue_saturation {
+                    set = set.hue_saturation(hue, saturation);
+                }
+                if let Some(temperature) = temperature {
+                    set = set.color_temperature(temperature);
+                }
+                set.send(handler).await.map_err(|err| Status::internal(err.to_string()))?;
+                self.info(Request::new(DeviceRequest { device: inner.device.clone() })).await
+
+            }
+        }
     }
 }

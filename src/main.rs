@@ -8,10 +8,11 @@ use log::{error, info};
 use tonic::transport::{Channel, Server};
 use crate::cli::{Cli, Commands};
 use crate::config::Config;
-use crate::tapo::server::rpc::{Color, DeviceRequest, EmptyRequest, EmptyResponse};
+use crate::tapo::server::rpc::{Color, DeviceRequest, EmptyRequest, EmptyResponse, HueSaturation, SetRequest, UsageResponse};
 use crate::tapo::server::rpc::tapo_client::TapoClient;
 use crate::tapo::server::rpc::tapo_server::TapoServer;
 use crate::device::Device;
+use crate::tapo::server::rpc;
 use crate::tapo::start_server;
 use crate::tapo::TonicErrMap;
 
@@ -34,14 +35,45 @@ async fn main() -> anyhow::Result<()> {
         Commands::Serve { port } => {
             start_server(port).await;
         }
-        Commands::Set { device, color, brightness, temperature, hue_saturation } => {
-            todo!()
+        Commands::Set { device, color, brightness, temperature, hue_saturation, power } => {
+            let mut client = get_client().await;
+            let request = SetRequest {
+                color: color.map(|c| c as i32),
+                device,
+                brightness: brightness.map(|v| v as u32),
+                temperature: temperature.map(|v| v as u32),
+                hue_saturation: {
+                    let hue = hue_saturation.hue.map(|v| v as u32);
+                    let saturation = hue_saturation.saturation.map(|v| v as u32);
+                    if hue.is_some() && saturation.is_some() {
+                        Some(HueSaturation {
+                            saturation: saturation.unwrap_or_default(),
+                            hue: hue.unwrap_or_default()
+                        })
+                    } else {
+                        None
+                    }
+                },
+                power
+            };
+            
+            let response = client.set(request).await.map_tonic_err();
+            println!("{:#?}", response.into_inner());
         }
         Commands::Info { device, json } => {
-            todo!()
+            let mut client = get_client().await;
+            if json {
+                let json = client.info_json(DeviceRequest { device }).await.map_tonic_err();
+                println!("{:#?}", json.into_inner().data);
+            } else {
+                let info = client.info(DeviceRequest { device }).await.map_tonic_err();
+                println!("{:#?}", info.into_inner());
+            }
         }
         Commands::Usage { device } => {
-            todo!()
+            let mut client = get_client().await;
+            let usage = client.usage(DeviceRequest { device }).await.map_tonic_err();
+            println!("{:?}", usage.into_inner());
         }
         Commands::On { device } => {
             let mut client = get_client().await;
@@ -61,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn get_client() -> TapoClient<Channel> {
     // TODO: Add option for custom host and port via cli arguments
+    // additionally add cli configuration file at ~/.config/tapoctl.toml which persists those default values
     let port = u16::from_str(std::env::var("TAPO_PORT").unwrap_or(String::from("19191")).as_str()).unwrap_or(19191);
     let format = format!("http://127.0.0.1:{port}");
     TapoClient::connect(format.clone()).await.unwrap_or_else(|_| {

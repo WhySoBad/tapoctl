@@ -8,10 +8,10 @@ service Tapo {
   rpc Info(DeviceRequest) returns (InfoResponse) {}
   rpc InfoJson(DeviceRequest) returns (InfoJsonResponse) {}
   rpc Usage(DeviceRequest) returns (UsageResponse) {}
-  rpc On(DeviceRequest) returns (EmptyResponse) {}
-  rpc Off(DeviceRequest) returns (EmptyResponse) {}
+  rpc On(DeviceRequest) returns (PowerResponse) {}
+  rpc Off(DeviceRequest) returns (PowerResponse) {}
 
-  rpc Set(SetRequest) returns (EmptyResponse) {}
+  rpc Set(SetRequest) returns (InfoResponse) {}
 }
 
 message EmptyRequest {}
@@ -33,16 +33,19 @@ message HueSaturation {
 message SetRequest {
   string device = 1;
   optional bool power = 2;
-  optional uint32 hue = 3;
-  optional HueSaturation hue_saturation = 4;
-  optional Color color = 5;
-  optional uint32 brightness = 6;
-  optional uint32 temperature = 7;
+  optional HueSaturation hue_saturation = 3;
+  optional Color color = 4;
+  optional uint32 brightness = 5;
+  optional uint32 temperature = 6;
 }
 
 // RESPONSES
 
 message EmptyResponse {}
+
+message PowerResponse {
+  bool device_on = 1;
+}
 
 message Device {
   string name = 1;

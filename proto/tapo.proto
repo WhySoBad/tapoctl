@@ -1,0 +1,128 @@
+syntax = "proto3";
+package tapo;
+
+service Tapo {
+  rpc Devices(EmptyRequest) returns (DevicesResponse) {}
+
+  rpc Reset(DeviceRequest) returns (EmptyResponse) {}
+  rpc Info(DeviceRequest) returns (InfoResponse) {}
+  rpc InfoJson(DeviceRequest) returns (InfoJsonResponse) {}
+  rpc Usage(DeviceRequest) returns (UsageResponse) {}
+  rpc On(DeviceRequest) returns (EmptyResponse) {}
+  rpc Off(DeviceRequest) returns (EmptyResponse) {}
+
+  rpc Set(SetRequest) returns (EmptyResponse) {}
+}
+
+message EmptyRequest {}
+
+message DeviceRequest {
+  string device = 1;
+}
+
+message BrightnessRequest {
+  string device = 1;
+  int32 brightness = 2;
+}
+
+message HueSaturation {
+  uint32 hue = 1;
+  uint32 saturation = 2;
+}
+
+message SetRequest {
+  string device = 1;
+  optional bool power = 2;
+  optional uint32 hue = 3;
+  optional HueSaturation hue_saturation = 4;
+  optional Color color = 5;
+  optional uint32 brightness = 6;
+  optional uint32 temperature = 7;
+}
+
+// RESPONSES
+
+message EmptyResponse {}
+
+message Device {
+  string name = 1;
+  string type = 2;
+  string address = 3;
+}
+
+message DevicesResponse {
+  repeated Device devices = 1;
+}
+
+message InfoResponse {
+  optional bool device_on = 1;
+  optional uint64 on_time = 2;
+  bool overheated = 3;
+  optional uint32 brightness = 4;
+  optional uint32 hue = 5;
+  optional uint32 saturation = 6;
+  optional uint32 temperature = 7;
+  optional string dynamic_effect_id = 8;
+}
+
+message InfoJsonResponse {
+  bytes data = 1;
+}
+
+message UsagePerPeriod {
+  uint64 today = 1;
+  uint64 week = 2;
+  uint64 month = 3;
+}
+
+message UsageResponse {
+  UsagePerPeriod time_usage = 1;
+  UsagePerPeriod power_usage = 2;
+  UsagePerPeriod saved_power = 3;
+}
+
+// ENUM DEFINITIONS
+
+enum Color {
+  CoolWhite = 0;
+  Daylight = 1;
+  Ivory = 2;
+  WarmWhite = 3;
+  Incandescent = 4;
+  Candlelight = 5;
+  Snow = 6;
+  GhostWhite = 7;
+  AliceBlue = 8;
+  LightGoldenrod = 9;
+  LemonChiffon = 10;
+  AntiqueWhite = 11;
+  Gold = 12;
+  Peru = 13;
+  Chocolate = 14;
+  SandyBrown = 15;
+  Coral = 16;
+  Pumpkin = 17;
+  Tomato = 18;
+  Vermilion = 19;
+  OrangeRed = 20;
+  Pink = 21;
+  Crimson = 22;
+  DarkRed = 23;
+  HotPink = 24;
+  Smitten = 25;
+  MediumPurple = 26;
+  BlueViolet = 27;
+  Indigo = 28;
+  LightSkyBlue = 29;
+  CornflowerBlue = 30;
+  Ultramarine = 31;
+  DeepSkyBlue = 32;
+  Azure = 33;
+  NavyBlue = 34;
+  LightTurquoise = 35;
+  Aquamarine = 36;
+  Turquoise = 37;
+  LightGreen = 38;
+  Lime = 39;
+  ForestGreen = 40;
+}

@@ -1,10 +1,11 @@
 syntax = "proto3";
+
 package tapo;
 
 service Tapo {
-  rpc Devices(EmptyRequest) returns (DevicesResponse) {}
+  rpc Devices(Empty) returns (DevicesResponse) {}
 
-  rpc Reset(DeviceRequest) returns (EmptyResponse) {}
+  rpc Reset(DeviceRequest) returns (Empty) {}
   rpc Info(DeviceRequest) returns (InfoResponse) {}
   rpc InfoJson(DeviceRequest) returns (InfoJsonResponse) {}
   rpc Usage(DeviceRequest) returns (UsageResponse) {}
@@ -14,78 +15,138 @@ service Tapo {
   rpc Set(SetRequest) returns (InfoResponse) {}
 }
 
-message EmptyRequest {}
+// A generic empty message for requests and responses
+message Empty {}
 
+// A generic request which only contains a device name under the `device` field
 message DeviceRequest {
+  // Name of the device for which the request should be executed
   string device = 1;
 }
 
-message BrightnessRequest {
-  string device = 1;
-  int32 brightness = 2;
-}
 
+// Representation of a hue saturation combination to represent a color
 message HueSaturation {
-  uint32 hue = 1;
-  uint32 saturation = 2;
+  // Hue value of the color
+  IntegerValueChange hue = 1;
+  // Saturation value of the color
+  IntegerValueChange saturation = 2;
 }
 
+// Representation of an integer value which can be either absolutely or relatively changed
+message IntegerValueChange {
+  // Boolean whether the value is an absolute or relative change to the current value
+  bool absolute = 1;
+  // Absolute or relative change value
+  sint32 value = 2;
+}
+
+// Request to update multiple values of a device at once
 message SetRequest {
+  // Name of the device which should be updated
   string device = 1;
+  // Optional boolean to change the power state
   optional bool power = 2;
+  // Optional new hue saturation values
   optional HueSaturation hue_saturation = 3;
+  // Optional new predefined color
   optional Color color = 4;
-  optional uint32 brightness = 5;
-  optional uint32 temperature = 6;
+  // Optional new brightness value
+  optional IntegerValueChange brightness = 5;
+  // Optional new temperature value
+  optional IntegerValueChange temperature = 6;
 }
 
-// RESPONSES
 
-message EmptyResponse {}
-
+// The response for any power request (on, off) which contains the current power state of the
+// device in the `device_on` field
 message PowerResponse {
   bool device_on = 1;
 }
 
+// Representation of a registered device on the server side
 message Device {
+  // String name of the device under which it was registered
   string name = 1;
+  // String type of the device (e.g. L530, L520)
   string type = 2;
+  // Ip address or hostname under which the device is accessible
   string address = 3;
+  // Status about the current session of the device (Authenticated, Refreshing, Error)
+  SessionStatus status = 4;
 }
 
+// The response of the devices request which returns all devices which were registered on the server.
+//
+// Important: This response only contains those devices into which the server could successfully login
 message DevicesResponse {
+  // List of devices which are currently accessible from the server
   repeated Device devices = 1;
 }
 
+// The response to the info request. It contains some selected fields of the info request which
+// are cover the most use cases of the info request. Should any other fields be needed the `InfoJsonRequest`
+// can be used to get the raw json as a response
 message InfoResponse {
+  // Boolean whether the device is currently running
   optional bool device_on = 1;
+  // Time since when the device is on
   optional uint64 on_time = 2;
+  // Boolean whether the device is currently overheated
   bool overheated = 3;
+  // The current brightness level of the device
   optional uint32 brightness = 4;
+  // The current hue level of the device's color
   optional uint32 hue = 5;
+  // The current saturation level of the device's color
   optional uint32 saturation = 6;
+  // The current color temperature of the device
   optional uint32 temperature = 7;
+  // The id of the dynamic effect running on the device if any is running
   optional string dynamic_effect_id = 8;
 }
 
+// Response for the info json request. This response contains the whole device
+// info as returned from the tapo device in the `data` field in the form of a serialized
+// json
 message InfoJsonResponse {
+  // Serialized json of the tapo device info response
   bytes data = 1;
 }
 
+// Representation for the usage of a unit in the last day, week and month
 message UsagePerPeriod {
+  // How much the unit was used today
   uint64 today = 1;
+  // How much the unit was used within the last week
   uint64 week = 2;
+  // How much the unit was used within the last month
   uint64 month = 3;
 }
 
+// Response to the device usage request which returns some statistics about the usage
+// of time, power and power savings of the device
 message UsageResponse {
+  // The time the device was used in the last day, week and month
   UsagePerPeriod time_usage = 1;
+  // The power which was used by the device in the last day, week and month
   UsagePerPeriod power_usage = 2;
+  // The power which was saved by the device in the last day, week and month
   UsagePerPeriod saved_power = 3;
 }
 
-// ENUM DEFINITIONS
+// Status information about the current session of a device
+enum SessionStatus {
+  // The current session is still active
+  Authenticated = 0;
+  // The session is currently being refreshed
+  Refreshing = 1;
+  // There was an error during session refreshing
+  Error = 2;
+}
 
+// Enum representation of the Google Home colors
+// supported by tapo light bulbs
 enum Color {
   CoolWhite = 0;
   Daylight = 1;

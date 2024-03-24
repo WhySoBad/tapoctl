@@ -1,24 +1,24 @@
 use std::collections::HashMap;
 use std::process::exit;
-use anyhow::Context;
+use std::sync::Arc;
 use log::{error, info};
+use spinoff::Spinner;
 use tapo::ApiClient;
+use tokio::sync::Mutex;
 use tonic::transport::Server;
-use crate::config::Config;
+use crate::config::ServerConfig;
+use crate::device;
 use crate::device::Device;
-use crate::tapo::server::rpc::Color;
+use crate::tapo::server::rpc::{Color, SessionStatus};
 use crate::tapo::server::rpc::tapo_server::TapoServer;
 use crate::tapo::server::TapoService;
 
 pub mod server;
 
-pub async fn start_server(port: u16) {
-    let config = match Config::new(None) {
-        Ok(config) => config,
-        Err(err) => {
-            error!("Error whilst reading config: {} ({})", err.to_string(), err.root_cause());
-            exit(1)
-        }
+pub async fn start_server(port: Option<u16>, config: Option<&ServerConfig>) {
+    let Some(config) = config.cloned() else {
+        error!("Please specify a server config for setting up the server");
+      exit(1);
     };
 
     let client = match ApiClient::new(&config.auth.username, &config.auth.password) {
@@ -29,7 +29,7 @@ pub async fn start_server(port: u16) {
         }
     };
 
-    let mut devices = HashMap::<String, Device>::new();
+    let mut devices = HashMap::<String, Arc<Mutex<Device>>>::new();
 
     info!("Starting device login phase");
 
@@ -40,10 +40,12 @@ pub async fn start_server(port: u16) {
     futures::future::join_all(devices_async).await.into_iter()
         .flatten()
         .for_each(|dev| {
-            devices.insert(dev.name.clone(), dev);
+            devices.insert(dev.name.clone(), Arc::new(Mutex::new(dev)));
         });
 
     info!("Finished device login phase");
+
+    let port = port.unwrap_or(config.port);
 
     let format = format!("127.0.0.1:{port}");
     let addr = match format.parse() {
@@ -114,14 +116,26 @@ fn transform_color(color: Color) -> tapo::requests::Color {
     }
 }
 
+fn transform_session_status(session_status: &device::SessionStatus) -> SessionStatus {
+    match session_status { 
+        device::SessionStatus::Authenticated => SessionStatus::Authenticated,
+        device::SessionStatus::Refreshing => SessionStatus::Refreshing,
+        device::SessionStatus::Error => SessionStatus::Error,
+    }
+}
+
 pub trait TonicErrMap<R> {
-    fn map_tonic_err(self) -> R;
+    fn map_tonic_err(self, spinner: Option<&mut Spinner>) -> R;
 }
 
 impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
-    fn map_tonic_err(self) -> R {
+    fn map_tonic_err(self, spinner: Option<&mut Spinner>) -> R {
         self.unwrap_or_else(|status| {
-            error!("{}", status.message());
+            if let Some(spinner) = spinner {
+                spinner.stop_with_message(status.message())
+            } else {
+                error!("{}", status.message());
+            }
             exit(1)
         })
     }

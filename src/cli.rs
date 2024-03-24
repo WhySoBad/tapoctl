@@ -1,7 +1,7 @@
-use std::fmt::format;
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use clap::builder::PossibleValue;
-use crate::tapo::server::rpc::Color;
+use clap::{Args, Parser, Subcommand};
+use spinoff::Spinner;
+use crate::config::Config;
+use crate::tapo::server::rpc::{Color, IntegerValueChange};
 
 #[derive(Parser, Debug)]
 #[command(name = "tapoctl")]
@@ -9,7 +9,15 @@ use crate::tapo::server::rpc::Color;
 #[command(version, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands
+    pub command: Commands,
+
+    /// Path to the configuration file which should be used
+    #[arg(long, short, value_parser = parse_config, default_value_t = Config::new(None))]
+    pub config: Config,
+
+    /// Print result (if any) as json
+    #[arg(long, short, default_value_t = false)]
+    pub json: bool
 }
 
 #[derive(Subcommand, Debug)]
@@ -18,8 +26,8 @@ pub enum Commands {
     Devices,
     /// Start the grpc server
     Serve {
-        #[arg(value_parser = clap::value_parser!(u16).range(1..=65535), default_value_t = 19191)]
-        port: u16
+        #[arg(value_parser = clap::value_parser!(u16).range(1..=65535))]
+        port: Option<u16>
     },
     /// Update properties of a device
     Set {
@@ -27,15 +35,15 @@ pub enum Commands {
         device: String,
 
         /// New brightness value
-        #[arg(value_parser = clap::value_parser!(u8).range(1..=100), long, short)]
-        brightness: Option<u8>,
+        #[arg(value_parser = parse_100_value, allow_negative_numbers = true, long, short)]
+        brightness: Option<IntegerValueChange>,
 
         #[command(flatten)]
         hue_saturation: HueSaturation,
 
         /// New color temperature
-        #[arg(value_parser = clap::value_parser!(u16).range(2500..=6500), long, short)]
-        temperature: Option<u16>,
+        #[arg(value_parser = parse_100_value, allow_negative_numbers = true, long, short)]
+        temperature: Option<IntegerValueChange>,
 
         /// Use predefined google home color (as PascalCase name)
         #[arg(long, short, value_parser = valid_color)]
@@ -43,16 +51,12 @@ pub enum Commands {
 
         /// Turn device on or off
         #[arg(long, short)]
-        power: Option<bool>
+        power: Option<bool>,
     },
     /// Print information about a device
     Info {
         /// Device for which the info should be fetched
         device: String,
-
-        /// Return the full device info json from the tapo api
-        #[arg(default_value_t = false, long, short)]
-        json: bool
     },
     /// Print usage information about a device
     Usage {
@@ -62,12 +66,12 @@ pub enum Commands {
     /// Turn device on
     On {
         /// Device which should be turned on
-        device: String
+        device: String,
     },
     /// Turn device off
     Off {
         /// Device which should be turned off
-        device: String
+        device: String,
     },
     /// Reset a device to factory defaults
     Reset {
@@ -80,12 +84,12 @@ pub enum Commands {
 #[group(multiple = true, requires_all = ["hue", "saturation"])]
 pub struct HueSaturation {
     /// New hue value
-    #[arg(value_parser = clap::value_parser!(u16).range(1..=360), long, short_alias = 'u')]
-    pub hue: Option<u16>,
+    #[arg(value_parser = parse_360_value, long, short_alias = 'u', allow_negative_numbers = true)]
+    pub hue: Option<IntegerValueChange>,
 
     /// New saturation value
-    #[arg(value_parser = clap::value_parser!(u8).range(1..=100), long, short)]
-    pub saturation: Option<u8>,
+    #[arg(value_parser = parse_100_value, long, short, allow_negative_numbers = true)]
+    pub saturation: Option<IntegerValueChange>,
 }
 
 
@@ -93,5 +97,53 @@ fn valid_color(s: &str) -> Result<Color, String> {
     match Color::from_str_name(s) {
         Some(c) => Ok(c),
         None => Err(format!("'{s}' is not a valid PascalCase google home color"))
+    }
+}
+
+fn parse_360_value(s: &str) -> Result<IntegerValueChange, String> {
+    let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
+    let relative = s.starts_with("+") || s.starts_with("-");
+    if !relative && !(1..=360).contains(&int) {
+        Err(format!("'{int}' is not in range 1 to 360"))?;
+    }
+    Ok(IntegerValueChange {
+        absolute: !relative,
+        value: int
+    })
+}
+
+fn parse_100_value(s: &str) -> Result<IntegerValueChange, String> {
+    let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
+    let relative = s.starts_with("+") || s.starts_with("-");
+    if !relative && !(1..=100).contains(&int) {
+        Err(format!("'{int}' is not in range 1 to 100"))?;
+    }
+    Ok(IntegerValueChange {
+        absolute: !relative,
+        value: int
+    })
+}
+
+fn parse_config(s: &str) -> Result<Config, String> {
+    Ok(Config::new(Some(s.to_string())))
+}
+
+pub trait SpinnerOpt {
+    fn success(&mut self, message: &str);
+
+    fn stop(&mut self, message: &str);
+}
+
+impl SpinnerOpt for Option<&mut Spinner> {
+    fn success(&mut self, message: &str) {
+        if let Some(spinner) = self {
+            spinner.success(message)
+        }
+    }
+
+    fn stop(&mut self, message: &str) {
+        if let Some(spinner) = self {
+            spinner.stop_with_message(message)
+        }
     }
 }

@@ -17,7 +17,7 @@ pub struct Cli {
     pub config: Config,
 
     /// Print result (if any) as json
-    #[arg(long, short, default_value_t = false)]
+    #[arg(long, short, default_value_t = false, global = true)]
     pub json: bool
 }
 
@@ -43,7 +43,7 @@ pub enum Commands {
         hue_saturation: HueSaturation,
 
         /// New color temperature
-        #[arg(value_parser = parse_100_value, allow_negative_numbers = true, long, short)]
+        #[arg(value_parser = parse_kelvin_value, allow_negative_numbers = true, long, short)]
         temperature: Option<IntegerValueChange>,
 
         /// Use predefined google home color
@@ -85,7 +85,7 @@ pub enum Commands {
 #[group(multiple = true, requires_all = ["hue", "saturation"])]
 pub struct HueSaturation {
     /// New hue value
-    #[arg(value_parser = parse_360_value, long, short_alias = 'u', allow_negative_numbers = true)]
+    #[arg(value_parser = parse_360_value, long, short = 'u', allow_negative_numbers = true)]
     pub hue: Option<IntegerValueChange>,
 
     /// New saturation value
@@ -117,34 +117,46 @@ fn parse_100_value(s: &str) -> Result<IntegerValueChange, String> {
     })
 }
 
+fn parse_kelvin_value(s: &str) -> Result<IntegerValueChange, String> {
+    let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
+    let relative = s.starts_with('+') || s.starts_with('-');
+    if !relative && !(2500..=6500).contains(&int) {
+        Err(format!("'{int}' is not in range 2500 to 6500"))?;
+    }
+    Ok(IntegerValueChange {
+        absolute: !relative,
+        value: int
+    })
+}
+
 fn parse_config(s: &str) -> Result<Config, String> {
     Ok(Config::new(Some(s.to_string())))
 }
 
-pub trait SpinnerOpt {
-    fn success(&mut self, message: &str);
+pub trait SpinnerOpt<'a> {
+    fn success(&mut self, message: impl Into<&'a str>);
 
-    fn fail(&mut self, message: &str);
+    fn fail(&mut self, message: impl Into<&'a str>);
 
-    fn update(&mut self, spinner_type: SpinnerFrames, message: String);
+    fn update(&mut self, spinner_type: SpinnerFrames, message: impl Into<&'a str>);
 }
 
-impl SpinnerOpt for Option<Spinner> {
-    fn success(&mut self, message: &str) {
+impl<'a> SpinnerOpt<'a> for Option<Spinner> {
+    fn success(&mut self, message: impl Into<&'a str>) {
         if let Some(spinner) = self {
-            spinner.success(message)
+            spinner.success(message.into())
         }
     }
 
-    fn fail(&mut self, message: &str) {
+    fn fail(&mut self, message: impl Into<&'a str>) {
         if let Some(spinner) = self {
-            spinner.fail(message)
+            spinner.fail(message.into())
         }
     }
 
-    fn update(&mut self, spinner_type: SpinnerFrames, message: String) {
+    fn update(&mut self, spinner_type: SpinnerFrames, message: impl Into<&'a str>) {
         if let Some(spinner) = self {
-            spinner.update(spinner_type, message, None);
+            spinner.update(spinner_type, message.into().to_string(), None)
         }
     }
 }

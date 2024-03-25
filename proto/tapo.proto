@@ -84,6 +84,12 @@ message DevicesResponse {
   repeated Device devices = 1;
 }
 
+message Rgb {
+  uint32 red = 1;
+  uint32 green = 2;
+  uint32 blue = 3;
+}
+
 // The response to the info request. It contains some selected fields of the info request which
 // are cover the most use cases of the info request. Should any other fields be needed the `InfoJsonRequest`
 // can be used to get the raw json as a response
@@ -104,6 +110,8 @@ message InfoResponse {
   optional uint32 temperature = 7;
   // The id of the dynamic effect running on the device if any is running
   optional string dynamic_effect_id = 8;
+  // The rgb color of either the temperature or the hsl values
+  optional Rgb color = 9;
 }
 
 // Response for the info json request. This response contains the whole device

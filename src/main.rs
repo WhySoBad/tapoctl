@@ -5,7 +5,6 @@ use std::process::exit;
 use std::str::FromStr;
 use clap::Parser;
 use colored::Colorize;
-use log::error;
 use serde_json::{json, Value};
 use spinoff::{Spinner, spinners};
 use tonic::transport::Channel;
@@ -25,7 +24,7 @@ mod cli;
 async fn main() -> anyhow::Result<()> {
     env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
 
-    let cli = Cli::parse();
+    let cli: Cli = Cli::parse();
     let config = cli.config;
     let json = cli.json;
 
@@ -43,13 +42,15 @@ async fn main() -> anyhow::Result<()> {
         start_server(port, server_config).await;
     } else {
         let mut spinner = (!json).then(|| Spinner::new(spinners::Dots, "Preparing client...", None));
-        let mut client = get_client(client_config, &mut spinner).await;
-        spinner.update(spinners::Dots.into(), "Sending request...".to_string());
+        let mut client = get_client(client_config, &mut spinner, json).await;
+        spinner.update(spinners::Dots.into(), "Sending request...");
         match cli.command {
             Commands::Devices => {
-                let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner).into_inner();
+                let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner, json).into_inner();
                 if json {
                     println!("{}", json!(devices))
+                } else if devices.devices.is_empty() {
+                    spinner.success("No devices registered")
                 } else {
                     spinner.success("Found devices:");
                     devices.devices.iter().for_each(|dev| {
@@ -76,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                 };
 
-                let state = client.set(request).await.map_tonic_err(&mut spinner).into_inner();
+                let state = client.set(request).await.map_tonic_err(&mut spinner, json).into_inner();
                 if json {
                     println!("{}", json!(state))
                 } else {
@@ -86,17 +87,17 @@ async fn main() -> anyhow::Result<()> {
             }
             Commands::Info { device } => {
                 if json {
-                    let json = client.info_json(DeviceRequest { device }).await.map_tonic_err(&mut spinner);
-                    let value: HashMap<String, serde_json::Value> = serde_json::from_slice(json.into_inner().data.as_slice()).unwrap();
+                    let json = client.info_json(DeviceRequest { device }).await.map_tonic_err(&mut spinner, json);
+                    let value: HashMap<String, Value> = serde_json::from_slice(json.into_inner().data.as_slice()).unwrap();
                     println!("{}", json!(value));
                 } else {
-                    let info = client.info(DeviceRequest { device }).await.map_tonic_err(&mut spinner);
+                    let info = client.info(DeviceRequest { device }).await.map_tonic_err(&mut spinner, json);
                     println!("{:#?}", info.into_inner());
                     todo!("Create a nice print format")
                 }
             }
             Commands::Usage { device } => {
-                let usage = client.usage(DeviceRequest { device }).await.map_tonic_err(&mut spinner).into_inner();
+                let usage = client.usage(DeviceRequest { device }).await.map_tonic_err(&mut spinner, json).into_inner();
                 if json {
                     println!("{}", json!(usage))
                 } else {
@@ -104,23 +105,28 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             Commands::On { device } => {
-                let result = client.on(DeviceRequest { device: device.clone() }).await.map_tonic_err(&mut spinner).into_inner();
+                let result = client.on(DeviceRequest { device: device.clone() }).await.map_tonic_err(&mut spinner, json).into_inner();
                 if json {
                     println!("{}", json!(result))
                 } else {
-                    println!("Device '{device}' is now turned on")
+                    spinner.success(format!("Device '{device}' is now turned on").as_str())
                 }
             }
             Commands::Off { device } => {
-                let result = client.off(DeviceRequest { device: device.clone() }).await.map_tonic_err(&mut spinner).into_inner();
+                let result = client.off(DeviceRequest { device: device.clone() }).await.map_tonic_err(&mut spinner, json).into_inner();
                 if json {
                     println!("{}", json!(result))
                 } else {
-                    println!("Device '{device}' is now turned off")
+                    spinner.success(format!("Device '{device}' is now turned off").as_str())
                 }
             }
             Commands::Reset { device } => {
-                client.reset(DeviceRequest { device }).await.map_tonic_err(&mut spinner);
+                client.reset(DeviceRequest { device }).await.map_tonic_err(&mut spinner, json);
+                if json {
+                    println!("{}", json!({ "success": true }))
+                } else {
+                    spinner.success("Restored factory defaults")
+                }
             }
             _ => {
                 unreachable!()
@@ -132,7 +138,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_client(config: Option<&ClientConfig>, spinner: &mut Option<Spinner>) -> TapoClient<Channel> {
+async fn get_client(config: Option<&ClientConfig>, spinner: &mut Option<Spinner>, json: bool) -> TapoClient<Channel> {
     let (secure, host, port) = match config {
         Some(config) => (config.secure, config.address.clone(), config.port),
         None => (false, String::from("127.0.0.1"), 19191)
@@ -144,9 +150,12 @@ async fn get_client(config: Option<&ClientConfig>, spinner: &mut Option<Spinner>
     let protocol = if secure { "https" } else { "http" };
 
     let format = format!("{protocol}://{host}:{port}");
-    TapoClient::connect(format.clone()).await.unwrap_or_else(|_| {
-        // If spinner is None print a json error
-        spinner.fail(format!("Unable to connect to server at {format}. Is it up and running?").as_str());
+    TapoClient::connect(format.clone()).await.unwrap_or_else(|err| {
+        if json {
+            println!("{}", json!({ "code": "Unable to connect to grpc server", "message": err.to_string() }))
+        } else {
+            spinner.fail(format!("Unable to connect to server at {format}. Is it up and running?").as_str());
+        }
         exit(1)
     })
 }

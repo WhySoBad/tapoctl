@@ -329,6 +329,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "colorsys"
+version = "0.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54261aba646433cb567ec89844be4c4825ca92a4f8afba52fc4dd88436e31bbd"
+
+[[package]]
 name = "concurrent-queue"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1608,6 +1614,7 @@ dependencies = [
  "anyhow",
  "clap",
  "colored",
+ "colorsys",
  "dirs",
  "env_logger",
  "futures",

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::process::exit;
 use std::sync::Arc;
 use log::{error, info};
+use serde_json::json;
 use spinoff::Spinner;
 use tapo::ApiClient;
 use tokio::sync::Mutex;
@@ -15,11 +16,12 @@ use crate::tapo::server::rpc::tapo_server::TapoServer;
 use crate::tapo::server::TapoService;
 
 pub mod server;
+mod color;
 
 pub async fn start_server(port: Option<u16>, config: Option<&ServerConfig>) {
     let Some(config) = config.cloned() else {
         error!("Please specify a server config for setting up the server");
-      exit(1);
+        exit(1);
     };
 
     let client = match ApiClient::new(&config.auth.username, &config.auth.password) {
@@ -126,13 +128,17 @@ fn transform_session_status(session_status: &device::SessionStatus) -> SessionSt
 }
 
 pub trait TonicErrMap<R> {
-    fn map_tonic_err(self, spinner: &mut Option<Spinner>) -> R;
+    fn map_tonic_err(self, spinner: &mut Option<Spinner>, json: bool) -> R;
 }
 
 impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
-    fn map_tonic_err(self, spinner: &mut Option<Spinner>) -> R {
+    fn map_tonic_err(self, spinner: &mut Option<Spinner>, json: bool) -> R {
         self.unwrap_or_else(|status| {
-            if spinner.is_some() {
+            let message = status.message();
+            let code = status.code().to_string();
+            if json {
+                println!("{}", json!({ "message": message, "code": code }));
+            } else if spinner.is_some() {
                 spinner.fail(status.message());
             } else {
                 error!("{}", status.message());

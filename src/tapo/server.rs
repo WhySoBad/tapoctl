@@ -9,6 +9,7 @@ use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, InfoJsonRe
 use crate::device;
 use crate::device::Device;
 use crate::tapo::{transform_color, transform_session_status};
+use crate::tapo::color::{any_to_rgb, color_to_hst};
 
 pub mod rpc {
     tonic::include_proto!("tapo");
@@ -105,15 +106,20 @@ impl Tapo for TapoService {
             }
             device::DeviceHandler::ColorLight(handler) => {
                 let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let brightness = Some(info.brightness as u32);
+                let hue = info.hue.map(|v| v as u32);
+                let saturation = info.saturation.map(|v| v as u32);
+                let temperature = Some(info.color_temp as u32);
                 InfoResponse {
-                    brightness: Some(info.brightness as u32),
+                    brightness,
+                    hue,
+                    saturation,
+                    temperature,
                     device_on: Some(info.device_on),
-                    hue: info.hue.map(|v| v as u32),
                     on_time: info.on_time,
                     dynamic_effect_id: info.dynamic_light_effect_id,
                     overheated: info.overheated,
-                    saturation: info.saturation.map(|v| v as u32),
-                    temperature: Some(info.color_temp as u32)
+                    color: any_to_rgb(temperature, hue, saturation, brightness)
                 }
             }
         };
@@ -247,10 +253,10 @@ impl Tapo for TapoService {
         };
 
         let color = inner.color.map(|_| transform_color(inner.color()));
-        let temperature = inner.temperature.map(|v| check_for_relative(v));
-        let brightness = inner.brightness.map(|v| check_for_relative(v));
+        let temperature = inner.temperature.map(&mut check_for_relative);
+        let brightness = inner.brightness.map(&mut check_for_relative);
         let (hue, saturation) = inner.hue_saturation.map(|hs| {
-            (hs.hue.map(|v| check_for_relative(v)), hs.saturation.map(|v| check_for_relative(v)))
+            (hs.hue.map(&mut check_for_relative), hs.saturation.map(check_for_relative))
         }).unwrap_or((None, None));
 
         if let Some(change) = &temperature {
@@ -288,7 +294,8 @@ impl Tapo for TapoService {
                     dynamic_effect_id: info.dynamic_light_effect_id,
                     overheated: info.overheated,
                     saturation: info.saturation.map(|v| v as u32),
-                    temperature: Some(info.color_temp as u32)
+                    temperature: Some(info.color_temp as u32),
+                    color: None
                 };
 
                 let mut set = handler.set();
@@ -330,13 +337,11 @@ impl Tapo for TapoService {
                         current_saturation = u8::try_from(change_saturation.value).unwrap_or_default();
                     } else {
                         let change = u8::try_from(max(min(change_saturation.value.abs(), 100), 1)).unwrap_or_default();
-                        println!("{change} {current_saturation}");
                         if change_saturation.value.is_negative() {
                             current_saturation -= min(change, current_saturation - 1);
                         } else {
                             current_saturation += min(change, 100 - current_saturation);
                         }
-                        println!("updated: {current_saturation}")
                     }
                     current_hue = min(max(current_hue, 1), 360);
                     set = set.hue_saturation(current_hue, current_saturation);
@@ -362,9 +367,12 @@ impl Tapo for TapoService {
                     info.device_on = Some(true);
                 }
                 if let Some(color) = color {
-                    set = set.color(color);
+                    set = set.color(color.clone());
                     info.device_on = Some(true);
-                    // TODO: Update info after color change
+                    let (hue, saturation, temperature) = color_to_hst(color);
+                    info.hue = Some(hue);
+                    info.saturation = Some(saturation);
+                    info.temperature = Some(temperature);
                 };
                 if let Some(power) = inner.power {
                     if power {
@@ -375,6 +383,7 @@ impl Tapo for TapoService {
                         info.device_on = Some(false);
                     }
                 }
+                info.color = any_to_rgb(info.temperature, info.hue, info.saturation, info.brightness);
                 set.send(handler).await.map_err(|err| Status::internal(err.to_string()))?;
                 Ok(Response::new(info))
             }

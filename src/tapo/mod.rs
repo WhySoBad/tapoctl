@@ -6,6 +6,7 @@ use spinoff::Spinner;
 use tapo::ApiClient;
 use tokio::sync::Mutex;
 use tonic::transport::Server;
+use crate::cli::SpinnerOpt;
 use crate::config::ServerConfig;
 use crate::device;
 use crate::device::Device;
@@ -125,14 +126,14 @@ fn transform_session_status(session_status: &device::SessionStatus) -> SessionSt
 }
 
 pub trait TonicErrMap<R> {
-    fn map_tonic_err(self, spinner: Option<&mut Spinner>) -> R;
+    fn map_tonic_err(self, spinner: &mut Option<Spinner>) -> R;
 }
 
 impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
-    fn map_tonic_err(self, spinner: Option<&mut Spinner>) -> R {
+    fn map_tonic_err(self, spinner: &mut Option<Spinner>) -> R {
         self.unwrap_or_else(|status| {
-            if let Some(spinner) = spinner {
-                spinner.stop_with_message(status.message())
+            if spinner.is_some() {
+                spinner.fail(status.message());
             } else {
                 error!("{}", status.message());
             }

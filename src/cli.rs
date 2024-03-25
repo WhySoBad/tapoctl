@@ -1,5 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use spinoff::Spinner;
+use spinoff::spinners::SpinnerFrames;
 use crate::config::Config;
 use crate::tapo::server::rpc::{Color, IntegerValueChange};
 
@@ -12,7 +13,7 @@ pub struct Cli {
     pub command: Commands,
 
     /// Path to the configuration file which should be used
-    #[arg(long, short, value_parser = parse_config, default_value_t = Config::new(None))]
+    #[arg(long, short, value_parser = parse_config, default_value_t = Config::None)]
     pub config: Config,
 
     /// Print result (if any) as json
@@ -45,8 +46,8 @@ pub enum Commands {
         #[arg(value_parser = parse_100_value, allow_negative_numbers = true, long, short)]
         temperature: Option<IntegerValueChange>,
 
-        /// Use predefined google home color (as PascalCase name)
-        #[arg(long, short, value_parser = valid_color)]
+        /// Use predefined google home color
+        #[arg(long, short, value_enum)]
         color: Option<Color>,
 
         /// Turn device on or off
@@ -92,17 +93,9 @@ pub struct HueSaturation {
     pub saturation: Option<IntegerValueChange>,
 }
 
-
-fn valid_color(s: &str) -> Result<Color, String> {
-    match Color::from_str_name(s) {
-        Some(c) => Ok(c),
-        None => Err(format!("'{s}' is not a valid PascalCase google home color"))
-    }
-}
-
 fn parse_360_value(s: &str) -> Result<IntegerValueChange, String> {
     let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
-    let relative = s.starts_with("+") || s.starts_with("-");
+    let relative = s.starts_with('+') || s.starts_with('-');
     if !relative && !(1..=360).contains(&int) {
         Err(format!("'{int}' is not in range 1 to 360"))?;
     }
@@ -114,7 +107,7 @@ fn parse_360_value(s: &str) -> Result<IntegerValueChange, String> {
 
 fn parse_100_value(s: &str) -> Result<IntegerValueChange, String> {
     let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
-    let relative = s.starts_with("+") || s.starts_with("-");
+    let relative = s.starts_with('+') || s.starts_with('-');
     if !relative && !(1..=100).contains(&int) {
         Err(format!("'{int}' is not in range 1 to 100"))?;
     }
@@ -131,19 +124,27 @@ fn parse_config(s: &str) -> Result<Config, String> {
 pub trait SpinnerOpt {
     fn success(&mut self, message: &str);
 
-    fn stop(&mut self, message: &str);
+    fn fail(&mut self, message: &str);
+
+    fn update(&mut self, spinner_type: SpinnerFrames, message: String);
 }
 
-impl SpinnerOpt for Option<&mut Spinner> {
+impl SpinnerOpt for Option<Spinner> {
     fn success(&mut self, message: &str) {
         if let Some(spinner) = self {
             spinner.success(message)
         }
     }
 
-    fn stop(&mut self, message: &str) {
+    fn fail(&mut self, message: &str) {
         if let Some(spinner) = self {
-            spinner.stop_with_message(message)
+            spinner.fail(message)
+        }
+    }
+
+    fn update(&mut self, spinner_type: SpinnerFrames, message: String) {
+        if let Some(spinner) = self {
+            spinner.update(spinner_type, message, None);
         }
     }
 }

@@ -2,7 +2,7 @@ use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::future::join_all;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tonic::{Request, Response, Status};
 use rpc::tapo_server::Tapo;
 use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, InfoJsonResponse, InfoResponse, IntegerValueChange, PowerResponse, SetRequest, UsagePerPeriod, UsageResponse};
@@ -10,6 +10,7 @@ use crate::device;
 use crate::device::Device;
 use crate::tapo::{transform_color, transform_session_status};
 use crate::tapo::color::{any_to_rgb, color_to_hst};
+use crate::tapo::state::State;
 
 pub mod rpc {
     tonic::include_proto!("tapo");
@@ -17,12 +18,13 @@ pub mod rpc {
 
 #[derive(Clone)]
 pub struct TapoService {
-    devices: Arc<HashMap<String, Arc<Mutex<Device>>>>
+    devices: Arc<HashMap<String, Arc<Mutex<Device>>>>,
+    state: Arc<Mutex<State>>
 }
 
 impl TapoService {
     pub fn new(devices: HashMap<String, Arc<Mutex<Device>>>) -> Self {
-        Self { devices: Arc::new(devices) }
+        Self { devices: Arc::new(devices), state: Arc::new(Mutex::new(State::new())) }
     }
 
     async fn get_device_by_name(&self, name: &String) -> Result<Arc<Mutex<Device>>, Status> {
@@ -30,6 +32,10 @@ impl TapoService {
             Some(dev) => Ok(dev.clone()),
             None => Err(Status::not_found(format!("Device '{name}' could not be found")))
         }
+    }
+
+    async fn get_state(&self) -> MutexGuard<'_, State> {
+        self.state.lock().await
     }
 }
 
@@ -285,18 +291,7 @@ impl Tapo for TapoService {
 
         match &device.handler {
             device::DeviceHandler::ColorLight(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
-                let mut info = InfoResponse {
-                    brightness: Some(info.brightness as u32),
-                    device_on: Some(info.device_on),
-                    hue: info.hue.map(|v| v as u32),
-                    on_time: info.on_time,
-                    dynamic_effect_id: info.dynamic_light_effect_id,
-                    overheated: info.overheated,
-                    saturation: info.saturation.map(|v| v as u32),
-                    temperature: Some(info.color_temp as u32),
-                    color: None
-                };
+                let mut info = self.get_state().await.get_info(&device).await?;
 
                 let mut set = handler.set();
                 if let Some(change) = brightness {
@@ -315,6 +310,7 @@ impl Tapo for TapoService {
                     set = set.brightness(current);
                     info.brightness = Some(current as u32);
                     info.device_on = Some(true);
+                    info.on_time = info.on_time.or(Some(0));
                 };
                 if let Some((change_hue, change_saturation)) = hue.zip(saturation) {
                     let mut current_hue = u16::try_from(info.hue.unwrap_or_default()).unwrap_or_default();
@@ -348,6 +344,7 @@ impl Tapo for TapoService {
                     info.hue = Some(current_hue as u32);
                     info.saturation = Some(current_saturation as u32);
                     info.device_on = Some(true);
+                    info.on_time = info.on_time.or(Some(0));
                 };
                 if let Some(change) = temperature {
                     let mut current = u16::try_from(info.temperature.unwrap_or_default()).unwrap_or_default();
@@ -365,26 +362,35 @@ impl Tapo for TapoService {
                     set = set.color_temperature(current);
                     info.temperature = Some(current as u32);
                     info.device_on = Some(true);
+                    info.on_time = info.on_time.or(Some(0));
                 }
                 if let Some(color) = color {
                     set = set.color(color.clone());
                     info.device_on = Some(true);
                     let (hue, saturation, temperature) = color_to_hst(color);
-                    info.hue = Some(hue);
-                    info.saturation = Some(saturation);
+                    if hue > 0 {
+                        info.hue = Some(hue);
+                        info.saturation = Some(saturation);
+                    } else {
+                        info.hue = None;
+                        info.saturation = None;
+                    }
                     info.temperature = Some(temperature);
                 };
                 if let Some(power) = inner.power {
                     if power {
                         set = set.on();
                         info.device_on = Some(true);
+                        info.on_time = info.on_time.or(Some(0));
                     } else {
                         set = set.off();
                         info.device_on = Some(false);
+                        info.on_time = None;
                     }
                 }
                 info.color = any_to_rgb(info.temperature, info.hue, info.saturation, info.brightness);
                 set.send(handler).await.map_err(|err| Status::internal(err.to_string()))?;
+                self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
                 Ok(Response::new(info))
             }
             device::DeviceHandler::Light(_handler) => {

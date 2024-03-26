@@ -80,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("{}", json!(state))
                 } else {
                     spinner.success("Updated device:");
-                    todo!("Create a nice print format")
+                    println!("{state}");
                 }
             }
             Commands::Info { device } => {
@@ -89,9 +89,9 @@ async fn main() -> anyhow::Result<()> {
                     let value: HashMap<String, Value> = serde_json::from_slice(json.into_inner().data.as_slice()).unwrap();
                     println!("{}", json!(value));
                 } else {
-                    let info = client.info(DeviceRequest { device }).await.map_tonic_err(&mut spinner, json);
-                    println!("{:#?}", info.into_inner());
-                    todo!("Create a nice print format")
+                    let info = client.info(DeviceRequest { device }).await.map_tonic_err(&mut spinner, json).into_inner();
+                    spinner.success("Device info:");
+                    println!("{info}");
                 }
             }
             Commands::Usage { device } => {
@@ -99,7 +99,8 @@ async fn main() -> anyhow::Result<()> {
                 if json {
                     println!("{}", json!(usage))
                 } else {
-                    todo!("Create a nice print format")
+                    spinner.success("Device usage:");
+                    println!("{usage}");
                 }
             }
             Commands::On { device } => {

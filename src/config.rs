@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
 use anyhow::Context;
-use log::{error, warn};
+use log::{debug, error, warn};
 use serde::Deserialize;
 
 const CONFIG_PATH: &str = "tapoctl/config.toml";
@@ -76,7 +76,7 @@ impl Config {
         let content = match fs::read(&path).context(format!("Missing configuration file at '{}'", path.to_string_lossy())) {
             Ok(content) => content,
             Err(err) => {
-                warn!("Unable to read config file at {path:?}: {err}");
+                debug!("Unable to read config file at {path:?}: {err}");
                 return Config::None
             }
         };

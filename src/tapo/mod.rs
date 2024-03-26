@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 use std::process::exit;
 use std::sync::Arc;
+use colored::{Colorize, CustomColor};
+use colorsys::Rgb;
 use log::{error, info};
 use serde_json::json;
 use spinoff::Spinner;
@@ -11,12 +14,13 @@ use crate::cli::SpinnerOpt;
 use crate::config::ServerConfig;
 use crate::device;
 use crate::device::Device;
-use crate::tapo::server::rpc::{Color, SessionStatus};
+use crate::tapo::server::rpc::{Color, InfoResponse, SessionStatus, UsageResponse};
 use crate::tapo::server::rpc::tapo_server::TapoServer;
 use crate::tapo::server::TapoService;
 
 pub mod server;
 mod color;
+mod state;
 
 pub async fn start_server(port: Option<u16>, config: Option<&ServerConfig>) {
     let Some(config) = config.cloned() else {
@@ -72,7 +76,7 @@ pub async fn start_server(port: Option<u16>, config: Option<&ServerConfig>) {
     }
 }
 
-/// ugly solution to transform tonic colors to tapo colors
+/// ugly solution to transform tonic colors to tapo colors since the map is crate public
 fn transform_color(color: Color) -> tapo::requests::Color {
     match color {
         Color::CoolWhite => tapo::requests::Color::CoolWhite,
@@ -145,5 +149,74 @@ impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
             }
             exit(1)
         })
+    }
+}
+
+
+impl Display for InfoResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut lines = vec![];
+        if let Some(on) = &self.device_on {
+            let state = on.then_some("Turned on").unwrap_or("Turned off");
+            lines.push(format!("{}: {state}", "State".bold()))
+        }
+        let overheated = if self.overheated { "Overheated" } else { "Normal" };
+        lines.push(format!("{}: {overheated}", "Thermals".bold()));
+        if let Some(on_time) = &self.on_time {
+            lines.push(format!("{}: {}min", "Uptime".bold(), on_time / 60u64))
+        }
+        if let Some(temperature) = &self.temperature {
+            if temperature > &0 {
+                lines.push(format!("{}: {temperature}K", "Temperature".bold()))
+            }
+        }
+        if let Some(color) = &self.color {
+            let block = "  ".on_custom_color(CustomColor::new(u8::try_from(color.red).unwrap_or_default(), u8::try_from(color.green).unwrap_or_default(), u8::try_from(color.blue).unwrap_or_default()));
+            let color = Rgb::new(color.red as f64, color.green as f64, color.blue as f64, None).to_hex_string();
+            lines.push(format!("{}: {color} {block}", "Color".bold()));
+        }
+        if let Some(brightness) = &self.brightness {
+            lines.push(format!("{}: {brightness}%", "Brightness".bold()))
+        }
+        if let Some((hue, saturation)) = &self.hue.zip(self.saturation) {
+            lines.push(format!("{}: {hue}", "Hue".bold()));
+            lines.push(format!("{}: {saturation}%", "Saturation".bold()))
+        }
+        if let Some(effect_id) = &self.dynamic_effect_id {
+            lines.push(format!("{}: {effect_id}", "Effect".bold()))
+        }
+
+        f.write_str(lines.join("\n").as_str())
+    }
+}
+
+impl Display for UsageResponse {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut lines = vec![];
+        if let Some(time) = &self.time_usage {
+            lines.push("Uptime:".underline().bold().to_string());
+            lines.push(format!("{}: {:.2}h", "Today".bold(), time.today as f32 / 60f32));
+            lines.push(format!("{}: {:.2}h", "Week".bold(), time.week as f32 / 60f32));
+            lines.push(format!("{}: {:.2}h", "Month".bold(), time.month as f32 / 60f32));
+        }
+        if let Some(power) = &self.power_usage {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push("Power used:".underline().bold().to_string());
+            lines.push(format!("{}: {:.3}kWh", "Today".bold(), power.today as f32 / 1000f32));
+            lines.push(format!("{}: {:.3}kWh", "Week".bold(), power.week as f32 / 1000f32));
+            lines.push(format!("{}: {:.3}kWh", "Month".bold(), power.month as f32 / 1000f32));
+        }
+        if let Some(saved) = &self.saved_power {
+            if !lines.is_empty() {
+                lines.push(String::new());
+            }
+            lines.push("Power saved:".underline().bold().to_string());
+            lines.push(format!("{}: {:.3}kWh", "Today".bold(), saved.today as f32 / 1000f32));
+            lines.push(format!("{}: {:.3}kWh", "Week".bold(), saved.week as f32 / 1000f32));
+            lines.push(format!("{}: {:.3}kWh", "Month".bold(), saved.month as f32 / 1000f32));
+        }
+        f.write_str(lines.join("\n").as_str())
     }
 }

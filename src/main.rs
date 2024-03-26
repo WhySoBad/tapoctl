@@ -1,5 +1,3 @@
-#![feature(duration_constructors)]
-
 use std::collections::HashMap;
 use std::process::exit;
 use std::str::FromStr;

@@ -19,7 +19,7 @@ spinoff = "0.8.0"
 tapo = { version = "0.7.9"}
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"]}
 toml = { version = "0.8.11"}
-tonic = "0.11.0"
+tonic = { version = "0.11.0"}
 
 [build-dependencies]
 tonic-build = "0.11.0"

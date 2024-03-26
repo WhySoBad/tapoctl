@@ -4,7 +4,7 @@ use tapo::{ApiClient, ColorLightHandler, GenericDeviceHandler, LightHandler};
 use tonic::Status;
 use crate::config::{DeviceDefinition, SupportedDevice};
 
-const SESSION_VALIDITY_MINUTES: u64 = 60;
+const SESSION_VALIDITY_MILLIS: u64 = 60 * 60 * 1000;
 
 pub enum SessionStatus {
     Authenticated,
@@ -70,7 +70,7 @@ impl Device {
 
     pub async fn try_refresh_session(&mut self) -> Result<(), Status> {
         let now = SystemTime::now();
-        if now.duration_since(self.session_start).is_ok_and(|d| d.gt(&Duration::from_mins(SESSION_VALIDITY_MINUTES))) {
+        if now.duration_since(self.session_start).is_ok_and(|d| d.gt(&Duration::from_millis(SESSION_VALIDITY_MILLIS))) {
             self.session_status = SessionStatus::Refreshing;
             info!("Refreshing session for device '{}'", self.name);
             match &mut self.handler {

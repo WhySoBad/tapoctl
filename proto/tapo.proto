@@ -84,9 +84,13 @@ message DevicesResponse {
   repeated Device devices = 1;
 }
 
+// Representation of a rgb color
 message Rgb {
+  // Red value (0..255)
   uint32 red = 1;
+  // Green value (0..255)
   uint32 green = 2;
+  // Blue value (0..255)
   uint32 blue = 3;
 }
 

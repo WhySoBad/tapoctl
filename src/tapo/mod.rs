@@ -22,8 +22,8 @@ pub mod server;
 mod color;
 mod state;
 
-pub async fn start_server(port: Option<u16>, config: Option<&ServerConfig>) {
-    let Some(config) = config.cloned() else {
+pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
+    let Some(config) = config else {
         error!("Please specify a server config for setting up the server");
         exit(1);
     };
@@ -54,7 +54,7 @@ pub async fn start_server(port: Option<u16>, config: Option<&ServerConfig>) {
 
     let port = port.unwrap_or(config.port);
 
-    let format = format!("127.0.0.1:{port}");
+    let format = format!("0.0.0.0:{port}");
     let addr = match format.parse() {
         Ok(addr) => addr,
         Err(_) => {

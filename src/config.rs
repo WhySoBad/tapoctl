@@ -66,6 +66,16 @@ pub enum SupportedDevice {
     Generic
 }
 
+impl ClientConfig {
+    pub fn from(address: Option<String>, port: Option<u16>, secure: Option<bool>) -> Option<Self> {
+        if address.is_some() || port.is_some() || secure.is_some() {
+            Some(Self { port: port.unwrap_or(default_port()), address: address.unwrap_or(default_address()), secure: secure.unwrap_or_default() })
+        } else {
+            None
+        }
+    }
+}
+
 impl Config {
     pub fn new(alternative_path: Option<String>) -> Self {
         let path = match &alternative_path {

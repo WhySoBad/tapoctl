@@ -13,8 +13,20 @@ pub struct Cli {
     pub command: Commands,
 
     /// Path to the configuration file which should be used
-    #[arg(long, short, value_parser = parse_config, default_value_t = Config::None)]
+    #[arg(long, short, value_parser = parse_config, default_value_t = Config::None, global = true)]
     pub config: Config,
+
+    /// Address for client to connect to gRPC server [default: config or 127.0.0.1]
+    #[arg(long, short, global = true)]
+    pub address: Option<String>,
+
+    /// Port for client to connect to gRPC server [default: config or 19191]
+    #[arg(long, short, value_parser = clap::value_parser!(u16).range(1..=65535), global = true)]
+    pub port: Option<u16>,
+
+    /// Boolean whether to connect to the gRPC using https [default: config or false]
+    #[arg(long, short, global = true)]
+    pub secure: Option<bool>,
 
     /// Print result (if any) as json
     #[arg(long, short, default_value_t = false, global = true)]
@@ -23,13 +35,25 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// List all registered devices
-    Devices,
+    #[command(flatten)]
+    Client(ClientCommand),
+    #[command(flatten)]
+    Server(ServerCommand)
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServerCommand {
     /// Start the grpc server
     Serve {
         #[arg(value_parser = clap::value_parser!(u16).range(1..=65535))]
         port: Option<u16>
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ClientCommand {
+    /// List all registered devices
+    Devices,
     /// Update properties of a device
     Set {
         /// Device which should be updated

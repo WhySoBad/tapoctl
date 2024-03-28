@@ -1,11 +1,17 @@
-FROM rust:alpine3.18 as builder
+FROM rust:alpine3.19 as builder
 
 WORKDIR /app
+
+RUN rustup target add x86_64-unknown-linux-musl
+RUN rustup target add aarch64-unknown-linux-musl
+
 RUN apk add --no-cache musl-dev openssl-dev openssl protoc gcc
 ENV OPENSSL_DIR=/usr
 ENV RUSTFLAGS=-Ctarget-feature=-crt-static
-ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
+# ENV CARGO_BUILD_TARGET=x86_64-unknown-linux-musl
 ENV OPENSSL_NO_VENDOR=1
+
+RUN CARGO_BUILD_TARGET=$([ "$TARGETPLATFORM" = "arm" ] && echo "aarch64-unknown-linux-musl" || echo "x86_64-unknown-linux-musl")
 
 COPY . .
 RUN cargo build --release

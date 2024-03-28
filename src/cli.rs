@@ -21,11 +21,11 @@ pub struct Cli {
     pub address: Option<String>,
 
     /// Port for client to connect to gRPC server [default: config or 19191]
-    #[arg(long, short, value_parser = clap::value_parser!(u16).range(1..=65535), global = true)]
+    #[arg(long, short = 'n', value_parser = clap::value_parser!(u16).range(1..=65535), global = true)]
     pub port: Option<u16>,
 
     /// Boolean whether to connect to the gRPC using https [default: config or false]
-    #[arg(long, short, global = true)]
+    #[arg(long, short = 'i', global = true)]
     pub secure: Option<bool>,
 
     /// Print result (if any) as json
@@ -59,19 +59,19 @@ pub enum ClientCommand {
         /// Device which should be updated
         device: String,
 
-        /// New brightness value
+        /// Brightness value between 1 and 100
         #[arg(value_parser = parse_100_value, allow_negative_numbers = true, long, short)]
         brightness: Option<IntegerValueChange>,
 
         #[command(flatten)]
         hue_saturation: HueSaturation,
 
-        /// New color temperature
+        /// Color temperature in kelvin between 2500 and 6500
         #[arg(value_parser = parse_kelvin_value, allow_negative_numbers = true, long, short)]
         temperature: Option<IntegerValueChange>,
 
         /// Use predefined google home color
-        #[arg(long, short, value_enum)]
+        #[arg(long, short = 'o', value_enum)]
         color: Option<Color>,
 
         /// Turn device on or off
@@ -108,11 +108,11 @@ pub enum ClientCommand {
 #[derive(Args, Clone, Debug)]
 #[group(multiple = true, requires_all = ["hue", "saturation"])]
 pub struct HueSaturation {
-    /// New hue value
+    /// Hue value between 1 and 360
     #[arg(value_parser = parse_360_value, long, short = 'u', allow_negative_numbers = true)]
     pub hue: Option<IntegerValueChange>,
 
-    /// New saturation value
+    /// Saturation value between 1 and 100
     #[arg(value_parser = parse_100_value, long, short, allow_negative_numbers = true)]
     pub saturation: Option<IntegerValueChange>,
 }

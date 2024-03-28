@@ -40,7 +40,7 @@ impl Device {
                 client.l520(&definition.address).await.ok().map(DeviceHandler::Light)
             }
             SupportedDevice::L610 => {
-                client.l520(&definition.address).await.ok().map(DeviceHandler::Light)
+                client.l610(&definition.address).await.ok().map(DeviceHandler::Light)
             }
             SupportedDevice::Generic => {
                 client.generic_device(&definition.address).await.ok().map(DeviceHandler::Generic)

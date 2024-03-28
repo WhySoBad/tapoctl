@@ -1,5 +1,6 @@
 # Example setup
 
-In this section I'll describe my tapoctl setup using a raspberry pi 4b.
+In this section I'll describe my tapoctl setup using a Raspberry Pi 4b.
 
-[TODO]
+>[!NOTE]
+> The example setup will be documented soon

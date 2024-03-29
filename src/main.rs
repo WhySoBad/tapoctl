@@ -8,7 +8,7 @@ use spinoff::{Spinner, spinners};
 use tonic::transport::Channel;
 use crate::cli::{Cli, ClientCommand, Commands, ServerCommand, SpinnerOpt};
 use crate::config::{ClientConfig, Config};
-use crate::tapo::server::rpc::{DeviceRequest, HueSaturation, Empty, SetRequest};
+use crate::tapo::server::rpc::{DeviceRequest, HueSaturation, Empty, SetRequest, EventRequest, EventType, InfoResponse, Device};
 use crate::tapo::server::rpc::tapo_client::TapoClient;
 use crate::tapo::start_server;
 use crate::tapo::TonicErrMap;
@@ -63,9 +63,7 @@ async fn main() -> anyhow::Result<()> {
                         spinner.success("No devices registered")
                     } else {
                         spinner.success("Found devices:");
-                        devices.devices.iter().for_each(|dev| {
-                            println!("{}: type {} at {}", dev.name.bold(), dev.r#type, dev.address)
-                        });
+                        println!("{}", devices.devices.iter().map(Device::to_string).collect::<Vec<_>>().join("\n\n"));
                     }
                 }
 
@@ -137,6 +135,38 @@ async fn main() -> anyhow::Result<()> {
                         println!("{}", json!({ "success": true }))
                     } else {
                         spinner.success("Restored factory defaults")
+                    }
+                }
+                ClientCommand::Events { types } => {
+                    let request = EventRequest { types: types.into_iter().map(i32::from).collect() };
+                    let mut events  = client.events(request).await.map_tonic_err(&mut spinner, json).into_inner();
+                    spinner.success("Subscribed to events");
+
+
+                    while let Ok(Some(event)) = events.message().await {
+                        if json {
+                            let event_type = EventType::try_from(event.r#type).unwrap_or_default().as_str_name();
+                            let body: HashMap<String, Value> = serde_json::from_slice(event.body.as_slice()).unwrap();
+                            println!("{}", json!({ "type": event_type, "body": body }));
+                            continue
+                        }
+                        match event.r#type.try_into() {
+                            Ok(EventType::DeviceStateChange) => {
+                                let body: InfoResponse = serde_json::from_slice(event.body.as_slice()).unwrap();
+                                println!("{}\n{body}\n", format!("Device '{}' changed:", body.name).bold().underline());
+                            },
+                            Ok(EventType::DeviceAuthChange) => {
+                                let body: Device = serde_json::from_slice(event.body.as_slice()).unwrap();
+                                println!("{}\n{body}\n", format!("Auth changed for device '{}':", body.name).bold().underline());
+                            }
+                            Err(err) => {
+                                println!("Error whilst decoding event type: {err}")
+                            }
+                        }
+                    }
+
+                    if !json {
+                        println!("Finished subscription. Stream closed!")
                     }
                 }
             }

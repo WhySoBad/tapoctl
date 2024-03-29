@@ -1,15 +1,19 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
+use log::error;
 use tonic::Status;
 use crate::device::{Device, DeviceHandler};
 use crate::tapo::color::any_to_rgb;
-use crate::tapo::server::rpc::InfoResponse;
+use crate::tapo::create_event;
+use crate::tapo::server::EventSender;
+use crate::tapo::server::rpc::{EventType, InfoResponse};
 
-const INFO_VALIDITY_SECS: u64 = 30;
+const INFO_VALIDITY_SECS: u64 = 30; // update device info after 30 seconds
 
 #[derive(Clone)]
 pub struct State {
     info: HashMap<String, DeviceInfo>,
+    sender: EventSender,
 }
 
 #[derive(Clone)]
@@ -19,38 +23,55 @@ pub struct DeviceInfo {
 }
 
 impl State {
-    pub fn new() -> Self {
-        State { info: HashMap::new() }
+    pub fn new(sender: EventSender) -> Self {
+        State { info: HashMap::new(), sender }
     }
 
+    /// Manually populate the cached state information for a device
+    ///
+    /// This is mainly used for the `set` endpoint where the new state is known without having to fetch it again
     pub fn update_info_optimistically(&mut self, device: String, info: InfoResponse) {
+        if let Some(current) = self.info.get(&device) {
+            // nothing to do: the info is already up-to-date
+            if current.response.eq(&info) { return; }
+        }
+
+        let event = create_event(EventType::DeviceStateChange, &info);
+
         let device_info = DeviceInfo {
             created: SystemTime::now(),
             response: info
         };
         self.info.insert(device, device_info);
+
+        if let Err(err) = self.sender.send(event) {
+            error!("Error whilst sending new device state: {err}")
+        }
     }
 
+    /// Refresh the cached state information for a device
     pub async fn refresh_info(&mut self, device: &Device) -> Result<InfoResponse, Status> {
-        match &device.handler {
+        let info = match device.get_handler()? {
             DeviceHandler::Light(handler) => {
                 let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
-                Ok(InfoResponse {
+                InfoResponse {
                     brightness: Some(info.brightness as u32),
                     device_on: Some(info.device_on),
                     on_time: info.on_time,
                     overheated: info.overheated,
+                    name: device.name.clone(),
                     ..InfoResponse::default()
-                })
+                }
             }
             DeviceHandler::Generic(handler) => {
                 let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
-                Ok(InfoResponse {
+                InfoResponse {
                     device_on: info.device_on,
                     on_time: info.on_time,
                     overheated: info.overheated,
+                    name: device.name.clone(),
                     ..InfoResponse::default()
-                })
+                }
             }
             DeviceHandler::ColorLight(handler) => {
                 let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
@@ -58,7 +79,7 @@ impl State {
                 let hue = info.hue.map(|v| v as u32);
                 let saturation = info.saturation.map(|v| v as u32);
                 let temperature = Some(info.color_temp as u32);
-                Ok(InfoResponse {
+                InfoResponse {
                     brightness,
                     hue,
                     saturation,
@@ -68,11 +89,22 @@ impl State {
                     dynamic_effect_id: info.dynamic_light_effect_id,
                     overheated: info.overheated,
                     color: any_to_rgb(temperature, hue, saturation, brightness),
-                })
+                    name: device.name.clone()
+                }
             }
+        };
+
+        match self.sender.send(create_event(EventType::DeviceStateChange, &info)) {
+            Ok(_) => {},
+            Err(err) => error!("Error whilst sending new device state: {err}")
         }
+        Ok(info)
     }
 
+    /// Get the current state for a device
+    ///
+    /// The state may be cached and have a maximum age of [`INFO_VALIDITY_SECS`]. Should the state
+    /// exceed the cache period it gets renewed automatically
     pub async fn get_info(&mut self, device: &Device) -> Result<InfoResponse, Status> {
         let info = self.info.get(&device.name);
 

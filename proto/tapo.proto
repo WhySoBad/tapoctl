@@ -3,20 +3,29 @@ syntax = "proto3";
 package tapo;
 
 service Tapo {
-  rpc Devices(Empty) returns (DevicesResponse) {}
+  rpc Devices(Empty) returns (DevicesResponse);
+  rpc Events(EventRequest) returns (stream EventResponse);
 
-  rpc Reset(DeviceRequest) returns (Empty) {}
-  rpc Info(DeviceRequest) returns (InfoResponse) {}
-  rpc InfoJson(DeviceRequest) returns (InfoJsonResponse) {}
-  rpc Usage(DeviceRequest) returns (UsageResponse) {}
-  rpc On(DeviceRequest) returns (PowerResponse) {}
-  rpc Off(DeviceRequest) returns (PowerResponse) {}
+  rpc Reset(DeviceRequest) returns (Empty);
+  rpc Info(DeviceRequest) returns (InfoResponse);
+  rpc InfoJson(DeviceRequest) returns (InfoJsonResponse);
+  rpc Usage(DeviceRequest) returns (UsageResponse);
+  rpc On(DeviceRequest) returns (PowerResponse);
+  rpc Off(DeviceRequest) returns (PowerResponse);
 
-  rpc Set(SetRequest) returns (InfoResponse) {}
+  rpc Set(SetRequest) returns (InfoResponse);
 }
 
 // A generic empty message for requests and responses
 message Empty {}
+
+// Subscribe to events from the server
+message EventRequest {
+  // Event types to subscribe to
+  //
+  // Important: When empty you'll be subscribing to all events
+  repeated EventType types = 1;
+}
 
 // A generic request which only contains a device name under the `device` field
 message DeviceRequest {
@@ -84,6 +93,14 @@ message DevicesResponse {
   repeated Device devices = 1;
 }
 
+// Single event of the event stream
+message EventResponse {
+  // Type of the event
+  EventType type = 1;
+  // Body for the event which can be serialized into different objects depending on the event type
+  bytes body = 2;
+}
+
 // Representation of a rgb color
 message Rgb {
   // Red value (0..255)
@@ -116,6 +133,8 @@ message InfoResponse {
   optional string dynamic_effect_id = 8;
   // The rgb color of either the temperature or the hsl values
   optional Rgb color = 9;
+  // Name of the device
+  string name = 10;
 }
 
 // Response for the info json request. This response contains the whole device
@@ -147,14 +166,25 @@ message UsageResponse {
   UsagePerPeriod saved_power = 3;
 }
 
+// Types of events sent by the event stream
+enum EventType {
+  // The auth state of a device has changed
+  DeviceAuthChange = 0;
+  // The internal state of a device has changed
+  DeviceStateChange = 1;
+}
+
 // Status information about the current session of a device
 enum SessionStatus {
   // The current session is still active
   Authenticated = 0;
-  // The session is currently being refreshed
-  Refreshing = 1;
   // There was an error during session refreshing
-  Error = 2;
+  Failure = 1;
+  // The session refresh didn't succeed multiple times in a row
+  //
+  // The device is assumed to be unreachable and therefore the next session refresh attempt will only occur after
+  // 10 minutes
+  RepeatedFailure = 2;
 }
 
 // Enum representation of the Google Home colors

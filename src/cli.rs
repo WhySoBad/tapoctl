@@ -2,7 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use spinoff::Spinner;
 use spinoff::spinners::SpinnerFrames;
 use crate::config::Config;
-use crate::tapo::server::rpc::{Color, IntegerValueChange};
+use crate::tapo::server::rpc::{Color, EventType, IntegerValueChange};
 
 #[derive(Parser, Debug)]
 #[command(name = "tapoctl")]
@@ -54,6 +54,12 @@ pub enum ServerCommand {
 pub enum ClientCommand {
     /// List all registered devices
     Devices,
+    /// Subscribe to device events
+    Events {
+        /// Event types to subscribe to
+        /// When nothing specified all events are subscribed
+        types: Vec<EventType>
+    },
     /// Update properties of a device
     Set {
         /// Device which should be updated

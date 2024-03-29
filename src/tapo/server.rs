@@ -2,10 +2,12 @@ use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::future::join_all;
+use log::debug;
 use tokio::sync::{Mutex, MutexGuard};
 use tonic::{Request, Response, Status};
+use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use rpc::tapo_server::Tapo;
-use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, InfoJsonResponse, InfoResponse, IntegerValueChange, PowerResponse, SetRequest, UsagePerPeriod, UsageResponse};
+use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, EventRequest, EventResponse, InfoJsonResponse, InfoResponse, IntegerValueChange, PowerResponse, SetRequest, UsagePerPeriod, UsageResponse};
 use crate::device;
 use crate::device::Device;
 use crate::tapo::{transform_color, transform_session_status};
@@ -16,15 +18,24 @@ pub mod rpc {
     tonic::include_proto!("tapo");
 }
 
+pub type EventSender = tokio::sync::broadcast::Sender<EventResponse>;
+pub type EventReceiver = tokio::sync::broadcast::Receiver<EventResponse>;
+pub type EventChannel = (EventSender, EventReceiver);
+
 #[derive(Clone)]
 pub struct TapoService {
     devices: Arc<HashMap<String, Arc<Mutex<Device>>>>,
-    state: Arc<Mutex<State>>
+    state: Arc<Mutex<State>>,
+    channel: Arc<EventChannel>
 }
 
 impl TapoService {
-    pub fn new(devices: HashMap<String, Arc<Mutex<Device>>>) -> Self {
-        Self { devices: Arc::new(devices), state: Arc::new(Mutex::new(State::new())) }
+    pub fn new(devices: HashMap<String, Arc<Mutex<Device>>>, channel: EventChannel) -> Self {
+        Self {
+            devices: Arc::new(devices),
+            state: Arc::new(Mutex::new(State::new(channel.0.clone()))),
+            channel: Arc::new(channel)
+        }
     }
 
     async fn get_device_by_name(&self, name: &String) -> Result<Arc<Mutex<Device>>, Status> {
@@ -62,13 +73,44 @@ impl Tapo for TapoService {
         Ok(Response::new(response))
     }
 
+    type EventsStream = ReceiverStream<Result<EventResponse, Status>>;
+
+    async fn events(&self, request: Request<EventRequest>) -> Result<Response<Self::EventsStream>, Status> {
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        let types = request.into_inner().types;
+        let broadcast = self.channel.clone();
+        let mut receiver = broadcast.1.resubscribe();
+
+        tokio::spawn(async move {
+            loop {
+                match receiver.recv().await {
+                    Ok(event) => {
+                        if types.contains(&event.r#type) || types.is_empty() {
+                            match tx.send(Ok(event)).await {
+                                Ok(_) => {},
+                                // the stream was closed
+                                Err(_) => return
+                            }
+                        }
+                    },
+                    Err(_) => {
+                        tx.send(Err(Status::internal("Error whilst receiving event"))).await.unwrap();
+                        return
+                    },
+                }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
     async fn reset(&self, request: Request<DeviceRequest>) -> Result<Response<Empty>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
         let mut device = device.lock().await;
         device.try_refresh_session().await?;
 
-        match &device.handler {
+        match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
                 handler.device_reset().await.map_err(|err| Status::internal(err.to_string()))?;
             }
@@ -90,13 +132,14 @@ impl Tapo for TapoService {
         device.try_refresh_session().await?;
 
 
-        let response = match &device.handler {
+        let response = match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
                 let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
                 InfoResponse {
                     brightness: Some(info.brightness as u32),
                     device_on: Some(info.device_on),
                     on_time: info.on_time,
+                    name: device.name.clone(),
                     overheated: info.overheated,
                     ..InfoResponse::default()
                 }
@@ -107,6 +150,7 @@ impl Tapo for TapoService {
                     device_on: info.device_on,
                     on_time: info.on_time,
                     overheated: info.overheated,
+                    name: device.name.clone(),
                     ..InfoResponse::default()
                 }
             }
@@ -125,7 +169,8 @@ impl Tapo for TapoService {
                     on_time: info.on_time,
                     dynamic_effect_id: info.dynamic_light_effect_id,
                     overheated: info.overheated,
-                    color: any_to_rgb(temperature, hue, saturation, brightness)
+                    name: device.name.clone(),
+                    color: any_to_rgb(temperature, hue, saturation, brightness),
                 }
             }
         };
@@ -139,7 +184,7 @@ impl Tapo for TapoService {
         let mut device = device.lock().await;
         device.try_refresh_session().await?;
 
-        let info = match &device.handler {
+        let info = match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
                 handler.get_device_info_json().await.map_err(|err| Status::internal(err.to_string()))?
             }
@@ -165,7 +210,7 @@ impl Tapo for TapoService {
         let mut device = device.lock().await;
         device.try_refresh_session().await?;
 
-        let usage = match &device.handler {
+        let usage = match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
                 handler.get_device_usage().await.map_err(|err| Status::internal(err.to_string()))?
             }
@@ -210,7 +255,7 @@ impl Tapo for TapoService {
         let mut device = device.lock().await;
         device.try_refresh_session().await?;
 
-        match &device.handler {
+        match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
                 handler.on().await.map_err(|err| Status::internal(err.to_string()))?
             }
@@ -221,6 +266,11 @@ impl Tapo for TapoService {
                 handler.on().await.map_err(|err| Status::internal(err.to_string()))?
             }
         }
+
+        let mut info = self.get_state().await.get_info(&device).await?;
+        info.device_on = Some(true);
+        info.on_time = Some(0);
+        self.get_state().await.update_info_optimistically(inner.device, info);
 
         Ok(Response::new(PowerResponse { device_on: true }))
     }
@@ -231,17 +281,22 @@ impl Tapo for TapoService {
         let mut device = device.lock().await;
         device.try_refresh_session().await?;
 
-        match &device.handler {
+        match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                handler.on().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.off().await.map_err(|err| Status::internal(err.to_string()))?
             }
             device::DeviceHandler::Generic(handler) => {
-                handler.on().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.off().await.map_err(|err| Status::internal(err.to_string()))?
             }
             device::DeviceHandler::ColorLight(handler) => {
                 handler.off().await.map_err(|err| Status::internal(err.to_string()))?
             }
         }
+
+        let mut info = self.get_state().await.get_info(&device).await?;
+        info.device_on = Some(false);
+        info.on_time = Some(0);
+        self.get_state().await.update_info_optimistically(inner.device, info);
 
         Ok(Response::new(PowerResponse { device_on: false }))
     }
@@ -289,7 +344,7 @@ impl Tapo for TapoService {
             }
         }
 
-        match &device.handler {
+        match device.get_handler()? {
             device::DeviceHandler::ColorLight(handler) => {
                 let mut info = self.get_state().await.get_info(&device).await?;
 
@@ -344,6 +399,7 @@ impl Tapo for TapoService {
                     info.hue = Some(current_hue as u32);
                     info.saturation = Some(current_saturation as u32);
                     info.device_on = Some(true);
+                    info.temperature = Some(0);
                     info.on_time = info.on_time.or(Some(0));
                 };
                 if let Some(change) = temperature {
@@ -361,6 +417,8 @@ impl Tapo for TapoService {
                     current = min(max(current, 2500), 6500);
                     set = set.color_temperature(current);
                     info.temperature = Some(current as u32);
+                    info.hue = None;
+                    info.saturation = None;
                     info.device_on = Some(true);
                     info.on_time = info.on_time.or(Some(0));
                 }

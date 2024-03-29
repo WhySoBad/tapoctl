@@ -5,6 +5,7 @@ use std::sync::Arc;
 use colored::{Colorize, CustomColor};
 use colorsys::Rgb;
 use log::{error, info};
+use serde::Serialize;
 use serde_json::json;
 use spinoff::Spinner;
 use tapo::ApiClient;
@@ -14,9 +15,9 @@ use crate::cli::SpinnerOpt;
 use crate::config::ServerConfig;
 use crate::device;
 use crate::device::Device;
-use crate::tapo::server::rpc::{Color, InfoResponse, SessionStatus, UsageResponse};
+use crate::tapo::server::rpc::{Color, EventRequest, EventResponse, EventType, InfoResponse, SessionStatus, UsageResponse};
 use crate::tapo::server::rpc::tapo_server::TapoServer;
-use crate::tapo::server::TapoService;
+use crate::tapo::server::{rpc, TapoService};
 
 pub mod server;
 mod color;
@@ -37,11 +38,12 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
     };
 
     let mut devices = HashMap::<String, Arc<Mutex<Device>>>::new();
+    let (tx, rx) = tokio::sync::broadcast::channel(10);
 
     info!("Starting device login phase");
 
     let devices_async = config.devices.into_iter().map(|(name, definition)| {
-        Device::new(name, definition, client.clone())
+        Device::new(name, definition, client.clone(), tx.clone())
     });
 
     futures::future::join_all(devices_async).await.into_iter()
@@ -63,12 +65,10 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
         }
     };
 
-    let svc = TapoServer::new(TapoService::new(devices));
+    let svc = TapoServer::new(TapoService::new(devices, (tx, rx)));
     info!("Starting server at {format}");
     match Server::builder().add_service(svc).serve(addr).await {
-        Ok(_) => {
-            info!("Stopped server")
-        },
+        Ok(_) => info!("Stopped server"),
         Err(err) => {
             error!("Unable to serve at {format}. Reason: {err}");
             exit(1)
@@ -123,12 +123,18 @@ fn transform_color(color: Color) -> tapo::requests::Color {
     }
 }
 
-fn transform_session_status(session_status: &device::SessionStatus) -> SessionStatus {
+pub fn transform_session_status(session_status: &device::SessionStatus) -> SessionStatus {
     match session_status { 
         device::SessionStatus::Authenticated => SessionStatus::Authenticated,
-        device::SessionStatus::Refreshing => SessionStatus::Refreshing,
-        device::SessionStatus::Error => SessionStatus::Error,
+        device::SessionStatus::Failure => SessionStatus::Failure,
+        device::SessionStatus::RepeatedFailure => SessionStatus::RepeatedFailure,
     }
+}
+
+pub fn create_event(event_type: EventType, body: impl Serialize) -> EventResponse {
+    let mut bytes = vec![];
+    serde_json::to_writer(&mut bytes, &body).unwrap_or_default();
+    EventResponse { body: bytes, r#type: i32::from(event_type) }
 }
 
 pub trait TonicErrMap<R> {
@@ -217,6 +223,22 @@ impl Display for UsageResponse {
             lines.push(format!("{}: {:.3}kWh", "Week".bold(), saved.week as f32 / 1000f32));
             lines.push(format!("{}: {:.3}kWh", "Month".bold(), saved.month as f32 / 1000f32));
         }
+        f.write_str(lines.join("\n").as_str())
+    }
+}
+
+impl Display for rpc::Device {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut lines = vec![];
+        let status = match SessionStatus::try_from(self.status).unwrap_or_default() {
+            SessionStatus::Authenticated => "Authenticated",
+            SessionStatus::Failure => "Authentication failed",
+            SessionStatus::RepeatedFailure => "Authentication failed multiple times",
+        };
+        lines.push(format!("{}", format!("{}:", self.name).bold().underline()));
+        lines.push(format!("{}: {}", "Type".bold(), self.r#type));
+        lines.push(format!("{}: {}", "Session".bold(), status));
+        lines.push(format!("{}: {}", "Address".bold(), self.address));
         f.write_str(lines.join("\n").as_str())
     }
 }

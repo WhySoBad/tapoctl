@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use log::error;
 use tonic::Status;
 use crate::device::{Device, DeviceHandler};
@@ -8,7 +8,7 @@ use crate::tapo::create_event;
 use crate::tapo::server::EventSender;
 use crate::tapo::server::rpc::{EventType, InfoResponse};
 
-const INFO_VALIDITY_SECS: u64 = 30; // update device info after 30 seconds
+const INFO_VALIDITY_MILLIS: u64 = 30 * 1000; // update device info after 30 seconds
 
 #[derive(Clone)]
 pub struct State {
@@ -110,7 +110,7 @@ impl State {
 
         let now = SystemTime::now();
         if let Some(info) = info {
-            if now.duration_since(info.created).is_ok_and(|dur| dur.as_secs() < INFO_VALIDITY_SECS) {
+            if info.created + Duration::from_millis(INFO_VALIDITY_MILLIS) < now {
                 // info is still valid
                 let mut copy = info.response.clone();
                 copy.on_time = copy.on_time.map(|time| time + now.duration_since(info.created).unwrap_or_default().as_secs());

@@ -235,7 +235,6 @@ impl Display for rpc::Device {
             SessionStatus::Failure => "Authentication failed",
             SessionStatus::RepeatedFailure => "Authentication failed multiple times",
         };
-        lines.push(format!("{}", format!("{}:", self.name).bold().underline()));
         lines.push(format!("{}: {}", "Type".bold(), self.r#type));
         lines.push(format!("{}: {}", "Session".bold(), status));
         lines.push(format!("{}: {}", "Address".bold(), self.address));

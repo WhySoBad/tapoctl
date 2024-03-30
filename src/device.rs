@@ -117,6 +117,7 @@ impl Device {
                     self.refresh_retires = 1;
                     Err(error)
                 } else {
+                    self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
                     Ok(())
                 }
             } else {
@@ -160,7 +161,7 @@ impl Device {
     }
 
     /// Access the current device handler
-    /// 
+    ///
     /// Returns tonic status code should the handler be unavailable
     pub fn get_handler(&self) -> Result<&DeviceHandler, Status> {
         match &self.handler {

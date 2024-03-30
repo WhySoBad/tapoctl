@@ -63,7 +63,10 @@ async fn main() -> anyhow::Result<()> {
                         spinner.success("No devices registered")
                     } else {
                         spinner.success("Found devices:");
-                        println!("{}", devices.devices.iter().map(Device::to_string).collect::<Vec<_>>().join("\n\n"));
+                        println!("{}", devices.devices.iter().map(|dev| {
+                            let heading = format!("{}:", dev.name.bold().underline());
+                            format!("{}\n{dev}", heading)
+                        }).collect::<Vec<_>>().join("\n\n"));
                     }
                 }
 

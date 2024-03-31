@@ -2,7 +2,6 @@ use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::future::join_all;
-use log::debug;
 use tokio::sync::{Mutex, MutexGuard};
 use tonic::{Request, Response, Status};
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;

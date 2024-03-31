@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::process::exit;
 use std::sync::Arc;
+use std::time::Duration;
 use colored::{Colorize, CustomColor};
 use colorsys::Rgb;
 use log::{error, info};
@@ -15,7 +16,7 @@ use crate::cli::SpinnerOpt;
 use crate::config::ServerConfig;
 use crate::device;
 use crate::device::Device;
-use crate::tapo::server::rpc::{Color, EventRequest, EventResponse, EventType, InfoResponse, SessionStatus, UsageResponse};
+use crate::tapo::server::rpc::{Color, EventResponse, EventType, InfoResponse, SessionStatus, UsageResponse};
 use crate::tapo::server::rpc::tapo_server::TapoServer;
 use crate::tapo::server::{rpc, TapoService};
 
@@ -29,13 +30,7 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
         exit(1);
     };
 
-    let client = match ApiClient::new(&config.auth.username, &config.auth.password) {
-        Ok(client) => client,
-        Err(_) => {
-            error!("Unable to create tapo api client");
-            exit(1);
-        }
-    };
+    let client = ApiClient::new(&config.auth.username, &config.auth.password).with_timeout(Duration::from_millis(config.timeout as u64));
 
     let mut devices = HashMap::<String, Arc<Mutex<Device>>>::new();
     let (tx, rx) = tokio::sync::broadcast::channel(10);

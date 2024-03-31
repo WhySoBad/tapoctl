@@ -16,7 +16,7 @@ prost = "0.12.3"
 serde = { version = "1.0.197", features = ["serde_derive"]}
 serde_json = "1.0.114"
 spinoff = "0.8.0"
-tapo = { version = "0.7.9"}
+tapo = { git = "https://github.com/mihai-dinculescu/tapo"}
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"]}
 toml = { version = "0.8.11"}
 tonic = { version = "0.11.0"}

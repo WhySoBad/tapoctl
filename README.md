@@ -42,6 +42,7 @@ For the following devices the support is coming soon™:
 The cli supports the following commands:
 
 * `devices`: List all devices registered on the server
+* `events`: Subscribe to live events (device change, auth change) 
 * `set <device>`: Update one or more properties of a light bulb <br>
     `--brightness`: Brightness value between 1 and 100<br>
     `--hue`: Hue value between 1 and 360<br>
@@ -109,6 +110,7 @@ type="L530" # The device type of the light bulb (L530, L520, ...)
 address="10.255.255.10" # The address under which the device can be reached
 
 port=19191 # Optional port to listen on. Default: 19191
+timeout=5000 # Optional timeout for requests to the tapo api in milliseconds. Default: 5000
 ```
 
 >[!TIP]

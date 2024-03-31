@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
 use anyhow::Context;
-use log::{debug, error, warn};
+use log::{debug, error};
 use serde::Deserialize;
 
 const CONFIG_PATH: &str = "tapoctl/config.toml";
@@ -40,7 +40,9 @@ pub struct ServerConfig {
     pub auth: Authentication,
     pub devices: HashMap<String, DeviceDefinition>,
     #[serde(default = "default_port")]
-    pub port: u16
+    pub port: u16,
+    #[serde(default = "default_timeout")]
+    pub timeout: u32
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -113,3 +115,5 @@ fn default_address() -> String {
 fn default_port() -> u16 {
     19191
 }
+
+fn default_timeout() -> u32 { 5000 }

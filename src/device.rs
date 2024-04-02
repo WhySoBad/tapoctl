@@ -1,6 +1,6 @@
 use std::cmp::min;
 use std::time::{Duration, SystemTime};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use tapo::{ApiClient, ColorLightHandler, GenericDeviceHandler, LightHandler};
 use tonic::Status;
 use crate::config::{DeviceDefinition, SupportedDevice};
@@ -12,7 +12,7 @@ const SESSION_VALIDITY_MILLIS: u64 = 60 * 60 * 1000; // 60 minutes
 const SESSION_REFRESH_RETRIES: u8 = 10; // after 10 failed session refresh attempts the session status can be set to RepeatedFailure
 const REPEATED_FAILURE_RETRY_MILLIS: u64 = 10 * 60 * 1000; // try to refresh as session which repeatedly failed to refresh after 10 minutes
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum SessionStatus {
     Authenticated,
     Failure,
@@ -95,6 +95,8 @@ impl Device {
     pub async fn try_refresh_session(&mut self) -> Result<(), Status> {
         let now = SystemTime::now();
 
+        debug!("Try session refresh: {:?} {:?}", now, self.next_session_action);
+
         if now.ge(&self.next_session_action) {
             info!("Attempting to refresh session for device '{}'", self.name);
 
@@ -113,20 +115,24 @@ impl Device {
                     },
                 };
                 if let Some(error) = result {
+                    debug!("Session refresh failed for device '{}' with reason: {}", self.name, error);
                     self.session_status = SessionStatus::Failure;
                     self.refresh_retires = 1;
                     Err(error)
                 } else {
+                    debug!("Successfully refreshed session for device '{}'", self.name);
                     self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
                     Ok(())
                 }
             } else {
+                debug!("Attempting initial session acquisition for device '{}'", self.name);
                 match Self::acquire_handler(&self.r#type, &self.address, self.client.clone()).await {
                     Ok(handler) => {
                         self.session_status = SessionStatus::Authenticated;
                         self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
                         self.refresh_retires = 0;
                         self.handler = Some(handler);
+                        debug!("Initial session acquisition succeeded for device '{}'. Next action is required at {:?}", self.name, self.next_session_action);
                         Ok(())
                     },
                     Err(status) => {
@@ -135,6 +141,7 @@ impl Device {
                             self.session_status = SessionStatus::RepeatedFailure;
                             self.next_session_action = now + Duration::from_millis(REPEATED_FAILURE_RETRY_MILLIS)
                         }
+                        debug!("Initial session acquisition failed for device '{}'. Next action is required at {:?}. Failures in row: {}", self.name, self.next_session_action, self.refresh_retires);
                         Err(status)
                     }
                 }
@@ -142,6 +149,7 @@ impl Device {
             };
 
             if current.ne(&self.session_status) {
+                debug!("Session status changed: {:?}", self.session_status);
                 let device = rpc::Device {
                     name: self.name.clone(),
                     status: i32::from(transform_session_status(&self.session_status)),

@@ -87,6 +87,77 @@ impl Device {
         }
     }
 
+    /// Forcefully refresh the session for the device
+    ///
+    /// This method should only be called directly when a [`tapo::TapoResponseError::SessionTimeout`]
+    /// was returned from an api call
+    pub async fn refresh_session(&mut self) -> Result<(), Status> {
+        info!("Attempting to refresh session for device '{}'", self.name);
+        let now = SystemTime::now();
+        let current = self.session_status.clone();
+
+        let result = if let Some(handler) = &mut self.handler {
+            let result = match handler {
+                DeviceHandler::ColorLight(handler) => {
+                    handler.refresh_session().await.map_err(|err| Status::internal(err.to_string())).err()
+                },
+                DeviceHandler::Light(handler) => {
+                    handler.refresh_session().await.map_err(|err| Status::internal(err.to_string())).err()
+                },
+                DeviceHandler::Generic(handler) => {
+                    handler.refresh_session().await.map_err(|err| Status::internal(err.to_string())).err()
+                },
+            };
+            if let Some(error) = result {
+                debug!("Session refresh failed for device '{}' with reason: {}", self.name, error);
+                self.session_status = SessionStatus::Failure;
+                self.refresh_retires = 1;
+                Err(error)
+            } else {
+                debug!("Successfully refreshed session for device '{}'", self.name);
+                self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
+                Ok(())
+            }
+        } else {
+            debug!("Attempting initial session acquisition for device '{}'", self.name);
+            match Self::acquire_handler(&self.r#type, &self.address, self.client.clone()).await {
+                Ok(handler) => {
+                    self.session_status = SessionStatus::Authenticated;
+                    self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
+                    self.refresh_retires = 0;
+                    self.handler = Some(handler);
+                    debug!("Initial session acquisition succeeded for device '{}'. Next action is required at {:?}", self.name, self.next_session_action);
+                    Ok(())
+                },
+                Err(status) => {
+                    self.refresh_retires = min(self.refresh_retires + 1, SESSION_REFRESH_RETRIES);
+                    if self.refresh_retires == SESSION_REFRESH_RETRIES {
+                        self.session_status = SessionStatus::RepeatedFailure;
+                        self.next_session_action = now + Duration::from_millis(REPEATED_FAILURE_RETRY_MILLIS)
+                    }
+                    debug!("Initial session acquisition failed for device '{}'. Next action is required at {:?}. Failures in row: {}", self.name, self.next_session_action, self.refresh_retires);
+                    Err(status)
+                }
+            }
+        };
+
+        if current.ne(&self.session_status) {
+            debug!("Session status changed: {:?}", self.session_status);
+            let device = rpc::Device {
+                name: self.name.clone(),
+                status: i32::from(transform_session_status(&self.session_status)),
+                address: self.address.clone(),
+                r#type: format!("{:?}", self.r#type)
+            };
+
+            if let Err(err) = self.sender.send(create_event(EventType::DeviceAuthChange, device)) {
+                error!("Error whilst sending new device auth state: {err}")
+            }
+        }
+
+        result
+    }
+
     /// Attempt to refresh the auth session for the device
     ///
     /// Should the session be expired or the previous refresh attempt failed a new attempt is started.
@@ -98,71 +169,7 @@ impl Device {
         debug!("Try session refresh: {:?} {:?}", now, self.next_session_action);
 
         if now.ge(&self.next_session_action) {
-            info!("Attempting to refresh session for device '{}'", self.name);
-
-            let current = self.session_status.clone();
-
-            let result = if let Some(handler) = &mut self.handler {
-                let result = match handler {
-                    DeviceHandler::ColorLight(handler) => {
-                        handler.refresh_session().await.map_err(|err| Status::internal(err.to_string())).err()
-                    },
-                    DeviceHandler::Light(handler) => {
-                        handler.refresh_session().await.map_err(|err| Status::internal(err.to_string())).err()
-                    },
-                    DeviceHandler::Generic(handler) => {
-                        handler.refresh_session().await.map_err(|err| Status::internal(err.to_string())).err()
-                    },
-                };
-                if let Some(error) = result {
-                    debug!("Session refresh failed for device '{}' with reason: {}", self.name, error);
-                    self.session_status = SessionStatus::Failure;
-                    self.refresh_retires = 1;
-                    Err(error)
-                } else {
-                    debug!("Successfully refreshed session for device '{}'", self.name);
-                    self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
-                    Ok(())
-                }
-            } else {
-                debug!("Attempting initial session acquisition for device '{}'", self.name);
-                match Self::acquire_handler(&self.r#type, &self.address, self.client.clone()).await {
-                    Ok(handler) => {
-                        self.session_status = SessionStatus::Authenticated;
-                        self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
-                        self.refresh_retires = 0;
-                        self.handler = Some(handler);
-                        debug!("Initial session acquisition succeeded for device '{}'. Next action is required at {:?}", self.name, self.next_session_action);
-                        Ok(())
-                    },
-                    Err(status) => {
-                        self.refresh_retires = min(self.refresh_retires + 1, SESSION_REFRESH_RETRIES);
-                        if self.refresh_retires == SESSION_REFRESH_RETRIES {
-                            self.session_status = SessionStatus::RepeatedFailure;
-                            self.next_session_action = now + Duration::from_millis(REPEATED_FAILURE_RETRY_MILLIS)
-                        }
-                        debug!("Initial session acquisition failed for device '{}'. Next action is required at {:?}. Failures in row: {}", self.name, self.next_session_action, self.refresh_retires);
-                        Err(status)
-                    }
-                }
-
-            };
-
-            if current.ne(&self.session_status) {
-                debug!("Session status changed: {:?}", self.session_status);
-                let device = rpc::Device {
-                    name: self.name.clone(),
-                    status: i32::from(transform_session_status(&self.session_status)),
-                    address: self.address.clone(),
-                    r#type: format!("{:?}", self.r#type)
-                };
-
-                if let Err(err) = self.sender.send(create_event(EventType::DeviceAuthChange, device)) {
-                    error!("Error whilst sending new device auth state: {err}")
-                }
-            }
-
-            result
+            self.refresh_session().await
         } else {
             Ok(())
         }
@@ -174,7 +181,17 @@ impl Device {
     pub fn get_handler(&self) -> Result<&DeviceHandler, Status> {
         match &self.handler {
             Some(handler) => Ok(handler),
-            None => Err(Status::unavailable(format!("The device '{}' is currently unauthenticated. Try again later or verify the configuration should the issue persist.", self.name)))
+            None => Err(Status::unauthenticated(format!("The device '{}' is currently unauthenticated. Try again later or verify the configuration should the issue persist.", self.name)))
+        }
+    }
+
+    /// Mutable access to current device handler
+    ///
+    /// Returns tonic status code should the handler be unavailable
+    pub fn get_handler_mut(&mut self) -> Result<&mut DeviceHandler, Status> {
+        match &mut self.handler {
+            Some(handler) => Ok(handler),
+            None => Err(Status::unauthenticated(format!("The device '{}' is currently unauthenticated. Try again later or verify the configuration should the issue persist.", self.name)))
         }
     }
 }

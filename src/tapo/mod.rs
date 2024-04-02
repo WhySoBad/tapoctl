@@ -9,7 +9,7 @@ use log::{error, info};
 use serde::Serialize;
 use serde_json::json;
 use spinoff::Spinner;
-use tapo::ApiClient;
+use tapo::{ApiClient, TapoResponseError};
 use tokio::sync::Mutex;
 use tonic::transport::Server;
 use crate::cli::SpinnerOpt;
@@ -150,6 +150,32 @@ impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
             }
             exit(1)
         })
+    }
+}
+
+pub trait TapoErrMap<R> {
+    async fn map_tapo_err(self, handler: &mut Device) -> Result<R, tonic::Status>;
+}
+
+impl<R> TapoErrMap<R> for Result<R, tapo::Error> {
+    async fn map_tapo_err(self, device: &mut Device) -> Result<R, tonic::Status> {
+        match self {
+            Ok(data) => Ok(data),
+            Err(err) => {
+                match err {
+                    // there is a session timeout which didn't get caught by the optimistic session
+                    // validator. Forcefully refresh the session
+                    tapo::Error::Tapo(TapoResponseError::SessionTimeout) => {
+                        if let Some(error) = device.refresh_session().await.err() {
+                            Err(error)
+                        } else {
+                            Err(tonic::Status::unauthenticated(err.to_string()))
+                        }
+                    },
+                    _ => Err(tonic::Status::internal(err.to_string()))
+                }
+            }
+        }
     }
 }
 

@@ -9,7 +9,7 @@ use rpc::tapo_server::Tapo;
 use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, EventRequest, EventResponse, InfoJsonResponse, InfoResponse, IntegerValueChange, PowerResponse, SetRequest, UsagePerPeriod, UsageResponse};
 use crate::device;
 use crate::device::Device;
-use crate::tapo::{transform_color, transform_session_status};
+use crate::tapo::{TapoErrMap, transform_color, transform_session_status};
 use crate::tapo::color::{any_to_rgb, color_to_hst};
 use crate::tapo::state::State;
 
@@ -111,10 +111,10 @@ impl Tapo for TapoService {
 
         match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                handler.device_reset().await.map_err(|err| Status::internal(err.to_string()))?;
+                handler.device_reset().await.map_tapo_err(&mut device).await?;
             }
             device::DeviceHandler::ColorLight(handler) => {
-               handler.device_reset().await.map_err(|err| Status::internal(err.to_string()))?;
+               handler.device_reset().await.map_tapo_err(&mut device).await?;
             },
             _ => {
                 return Err(Status::unimplemented("Reset API is not supported by this device type"))
@@ -133,7 +133,7 @@ impl Tapo for TapoService {
 
         let response = match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await.map_tapo_err(&mut device).await?;
                 InfoResponse {
                     brightness: Some(info.brightness as u32),
                     device_on: Some(info.device_on),
@@ -144,7 +144,7 @@ impl Tapo for TapoService {
                 }
             }
             device::DeviceHandler::Generic(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await.map_tapo_err(&mut device).await?;
                 InfoResponse {
                     device_on: info.device_on,
                     on_time: info.on_time,
@@ -154,7 +154,7 @@ impl Tapo for TapoService {
                 }
             }
             device::DeviceHandler::ColorLight(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await.map_tapo_err(&mut device).await?;
                 let brightness = Some(info.brightness as u32);
                 let hue = info.hue.map(|v| v as u32);
                 let saturation = info.saturation.map(|v| v as u32);
@@ -185,13 +185,13 @@ impl Tapo for TapoService {
 
         let info = match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                handler.get_device_info_json().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.get_device_info_json().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::Generic(handler) => {
-                handler.get_device_info_json().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.get_device_info_json().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::ColorLight(handler) => {
-                handler.get_device_info_json().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.get_device_info_json().await.map_tapo_err(&mut device).await?
             }
         };
 
@@ -211,10 +211,10 @@ impl Tapo for TapoService {
 
         let usage = match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                handler.get_device_usage().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.get_device_usage().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::ColorLight(handler) => {
-                handler.get_device_usage().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.get_device_usage().await.map_tapo_err(&mut device).await?
             },
             device::DeviceHandler::Generic(_) => {
                 return Err(Status::unimplemented("Device usage API is not supported by this device type"))
@@ -256,13 +256,13 @@ impl Tapo for TapoService {
 
         match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                handler.on().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.on().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::Generic(handler) => {
-                handler.on().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.on().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::ColorLight(handler) => {
-                handler.on().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.on().await.map_tapo_err(&mut device).await?
             }
         }
 
@@ -282,13 +282,13 @@ impl Tapo for TapoService {
 
         match device.get_handler()? {
             device::DeviceHandler::Light(handler) => {
-                handler.off().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.off().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::Generic(handler) => {
-                handler.off().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.off().await.map_tapo_err(&mut device).await?
             }
             device::DeviceHandler::ColorLight(handler) => {
-                handler.off().await.map_err(|err| Status::internal(err.to_string()))?
+                handler.off().await.map_tapo_err(&mut device).await?
             }
         }
 
@@ -446,7 +446,7 @@ impl Tapo for TapoService {
                     }
                 }
                 info.color = any_to_rgb(info.temperature, info.hue, info.saturation, info.brightness);
-                set.send(handler).await.map_err(|err| Status::internal(err.to_string()))?;
+                set.send(handler).await.map_tapo_err(&mut device).await?;
                 self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
                 Ok(Response::new(info))
             }

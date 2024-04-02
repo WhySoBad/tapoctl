@@ -30,15 +30,16 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
         exit(1);
     };
 
-    let client = ApiClient::new(&config.auth.username, &config.auth.password).with_timeout(Duration::from_millis(config.timeout as u64));
-
     let mut devices = HashMap::<String, Arc<Mutex<Device>>>::new();
     let (tx, rx) = tokio::sync::broadcast::channel(10);
 
     info!("Starting device login phase");
 
     let devices_async = config.devices.into_iter().map(|(name, definition)| {
-        Device::new(name, definition, client.clone(), tx.clone())
+        // give every device its own client for more parallelism since it seems as if sharing the same client
+        // causes blocking when sending requests for multiple devices in a short period of time
+        let client = ApiClient::new(&config.auth.username, &config.auth.password).with_timeout(Duration::from_millis(config.timeout as u64));
+        Device::new(name, definition, client, tx.clone())
     });
 
     futures::future::join_all(devices_async).await.into_iter()

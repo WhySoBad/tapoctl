@@ -110,7 +110,7 @@ type="L530" # The device type of the light bulb (L530, L520, ...)
 address="10.255.255.10" # The address under which the device can be reached
 
 port=19191 # Optional port to listen on. Default: 19191
-timeout=5000 # Optional timeout for requests to the tapo api in milliseconds. Default: 5000
+timeout=10000 # Optional timeout for requests to the tapo api in milliseconds. Default: 10000
 ```
 
 >[!TIP]

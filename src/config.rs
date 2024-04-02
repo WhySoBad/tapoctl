@@ -116,4 +116,4 @@ fn default_port() -> u16 {
     19191
 }
 
-fn default_timeout() -> u32 { 5000 }
+fn default_timeout() -> u32 { 10000 }

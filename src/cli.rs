@@ -5,9 +5,7 @@ use crate::config::Config;
 use crate::tapo::server::rpc::{Color, EventType, IntegerValueChange};
 
 #[derive(Parser, Debug)]
-#[command(name = "tapoctl")]
-#[command(about = "A cli and server for interacting locally with your tplink tapo lamps from the command line")]
-#[command(version, long_about = None)]
+#[command(version, about, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

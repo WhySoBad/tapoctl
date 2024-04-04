@@ -2,6 +2,14 @@
 name = "tapoctl"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+authors = ["WhySoBad <49595640+WhySoBad@users.noreply.github.com>"]
+description = "A cli and server for interacting locally with your tplink tapo lamps from the command line"
+readme = "README.md"
+homepage = "https://github.com/whysobad/tapoctl"
+repository = "https://github.com/whysobad/tapoctl"
+keywords = ["tapo", "smart-bulb", "cli", "grpc"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow = "1.0.81"

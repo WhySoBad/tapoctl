@@ -1,0 +1,14 @@
+[auth]
+username=""
+password=""
+
+[devices.lamp-1]
+address="10.255.255.xxx"
+type="L530"
+
+[devices.lamp-2]
+address="10.255.255.xxx"
+type="L530"
+
+timeout=10000
+port=19191

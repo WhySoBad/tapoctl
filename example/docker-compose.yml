@@ -1,0 +1,8 @@
+version: "3.8"
+
+services:
+  tapoctl:
+    image: ghcr.io/whysobad/tapoctl
+    volumes:
+      - ./config.toml:/home/tapo/.config/tapoctl/config.toml
+    network_mode: "host"

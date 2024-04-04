@@ -5,4 +5,4 @@
 * [ ] Add some kind of metrics about devices
 * [ ] Implement `set` for non-color bulbs
 * [x] Write docs
-* [ ] Better handling for expired sessions (SessionTimeout)
+* [x] Better handling for expired sessions (SessionTimeout)

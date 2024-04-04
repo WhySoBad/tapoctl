@@ -345,7 +345,7 @@ impl Tapo for TapoService {
 
         match device.get_handler()? {
             device::DeviceHandler::ColorLight(handler) => {
-                let mut info = self.get_state().await.get_info(&device).await?;
+                let mut info = self.get_state().await.get_info_silent(&device).await?;
 
                 let mut set = handler.set();
                 if let Some(change) = brightness {

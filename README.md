@@ -7,7 +7,7 @@ Control your tapo light bulbs from anywhere on your local network using the comm
 I wanted to control my tapo light bulbs from my local network but without the necessity of granting them access to my local network (or to the internet at all).
 Additionally, I wanted to be able to control by light bulbs from the command line.
 
-The idea behind this project is to create a gRPC [server](#server) which can be hosted on a local device (see [example setup](/docs/example.md)) and which is connected 
+The idea behind this project is to create a gRPC [server](#server) which can be hosted on a local device (see [example setup](/example)) and which is connected 
 to both your local network and the network containing the light bulbs. It then acts as a proxy and allows you to control
 your light bulbs from anywhere on your local network without using the proprietary app.
 
@@ -89,7 +89,7 @@ The binary includes a gRPC server which can be started using `serve` command.
 
 The server has to be in the same network as the devices. Should your devices be in another network than your local network (e.g. guest or iot network)
 you'll have to make sure the device on which the server is hosted is connected to both your local network and the network in which the lamps are located in order for you to be
-able to control the bulbs from your local network. More about this can be seen in the [example setup](/docs/example.md) with a Raspberry Pi.
+able to control the bulbs from your local network. More about this can be seen in the [example setup](/example) with a Raspberry Pi.
 
 ### Configuration
 

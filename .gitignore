@@ -3,3 +3,5 @@ target
 *.iml
 config.toml
 docker-compose.yml
+!example/config.toml
+!example/docker-compose.yml

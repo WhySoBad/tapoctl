@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
-use log::error;
+use log::{error, info};
 use tonic::Status;
 use crate::device::{Device, DeviceHandler};
 use crate::tapo::color::any_to_rgb;
@@ -36,6 +36,7 @@ impl State {
             if current.response.eq(&info) { return; }
         }
 
+        info!("Sending new device state event 2");
         let event = create_event(EventType::DeviceStateChange, &info);
 
         let device_info = DeviceInfo {
@@ -50,7 +51,11 @@ impl State {
     }
 
     /// Refresh the cached state information for a device
-    pub async fn refresh_info(&mut self, device: &Device) -> Result<InfoResponse, Status> {
+    ///
+    /// When `send_state` is set to `true` the refreshed info is sent as an update event to
+    /// all subscribed clients. It should be set to `false` when the refresh is coming from
+    /// a request which updates the state afterwards optimistically
+    pub async fn refresh_info(&mut self, device: &Device, send_state: bool) -> Result<InfoResponse, Status> {
         let info = match device.get_handler()? {
             DeviceHandler::Light(handler) => {
                 let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
@@ -94,10 +99,14 @@ impl State {
             }
         };
 
-        match self.sender.send(create_event(EventType::DeviceStateChange, &info)) {
-            Ok(_) => {},
-            Err(err) => error!("Error whilst sending new device state: {err}")
+        if send_state {
+            info!("Sending new device state event");
+            match self.sender.send(create_event(EventType::DeviceStateChange, &info)) {
+                Ok(_) => {},
+                Err(err) => error!("Error whilst sending new device state: {err}")
+            }
         }
+
         Ok(info)
     }
 
@@ -119,7 +128,32 @@ impl State {
         };
 
         // get refreshed device info from device handler
-        let response = self.refresh_info(device).await?;
+        let response = self.refresh_info(device, true).await?;
+        self.info.insert(device.name.clone(), DeviceInfo { response: response.clone(), created: now });
+        Ok(response)
+    }
+
+    /// Get the current state for a device silently
+    ///
+    /// It's the same as [`self.get_info`] but it doesn't send an update state event
+    /// should an expired state needs to be re-fetched. It should only be used when
+    /// the state is updated optimistically later on to ensure the clients have the
+    /// correct device states
+    pub async fn get_info_silent(&mut self, device: &Device) -> Result<InfoResponse, Status> {
+        let info = self.info.get(&device.name);
+
+        let now = SystemTime::now();
+        if let Some(info) = info {
+            if info.created + Duration::from_millis(INFO_VALIDITY_MILLIS) < now {
+                // info is still valid
+                let mut copy = info.response.clone();
+                copy.on_time = copy.on_time.map(|time| time + now.duration_since(info.created).unwrap_or_default().as_secs());
+                return Ok(copy)
+            };
+        };
+
+        // get refreshed device info from device handler without sending an update event
+        let response = self.refresh_info(device, false).await?;
         self.info.insert(device.name.clone(), DeviceInfo { response: response.clone(), created: now });
         Ok(response)
     }

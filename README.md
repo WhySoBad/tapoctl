@@ -34,6 +34,14 @@ The following tapo smart light bulbs are supported:
 * L610
 * Generic light bulbs with limited feature set
 
+Since I only own some `L530` smart bulbs I can only test the `Generic` and `L530` type. The other light bulb types should work 
+as expected since the `L530` seems to have a superset of functionalities. The `L900` light strips may have only limited functionality 
+since the whole project is focused on light bulbs. 
+
+The provided feature and device support of tapoctl is based off the feature matrix of the [tapo crate](https://crates.io/crates/tapo) which is used internally.
+
+If any functionality or your device is missing please open an issue or submit a pull request.
+
 ## Cli
 
 The cli supports the following commands:
@@ -103,7 +111,7 @@ password=""
 
 # Register a device with the name `lamp-1`
 [devices.lamp-1]
-type="L530" # The device type of the light bulb (L530, L520, ...)
+type="L530" # The device type of the light bulb (L530, L520, Generic, ...)
 address="10.255.255.10" # The address under which the device can be reached
 
 port=19191 # Optional port to listen on. Default: 19191

@@ -343,24 +343,28 @@ impl Tapo for TapoService {
             }
         }
 
+        fn get_transformed_brightness(info: &InfoResponse, change: IntegerValueChange) -> u8 {
+            let mut current = u8::try_from(info.brightness.unwrap_or_default()).unwrap_or_default();
+            if change.absolute {
+                current = u8::try_from(change.value).unwrap_or_default();
+            } else {
+                let change_abs = u8::try_from(max(min(change.value.abs(), 100), 1)).unwrap_or_default();
+                if change.value.is_negative() {
+                    current -= change_abs;
+                } else {
+                    current += change_abs;
+                }
+            }
+            min(max(current, 1), 100)
+        }
+
         match device.get_handler()? {
             device::DeviceHandler::ColorLight(handler) => {
                 let mut info = self.get_state().await.get_info_silent(&device).await?;
 
                 let mut set = handler.set();
                 if let Some(change) = brightness {
-                    let mut current = u8::try_from(info.brightness.unwrap_or_default()).unwrap_or_default();
-                    if change.absolute {
-                        current = u8::try_from(change.value).unwrap_or_default();
-                    } else {
-                        let change_abs = u8::try_from(max(min(change.value.abs(), 100), 1)).unwrap_or_default();
-                        if change.value.is_negative() {
-                            current -= change_abs;
-                        } else {
-                            current += change_abs;
-                        }
-                    }
-                    current = min(max(current, 1), 100);
+                    let current = get_transformed_brightness(&info, change);
                     set = set.brightness(current);
                     info.brightness = Some(current as u32);
                     info.device_on = Some(true);
@@ -450,13 +454,76 @@ impl Tapo for TapoService {
                 self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
                 Ok(Response::new(info))
             }
-            device::DeviceHandler::Light(_handler) => {
-                Err(Status::unimplemented("Set API is not yet implemented for this device type"))?;
-                todo!("Send request for every sub-category to simulate set-api like behaviour")
-            }
-            _ => {
-                Err(Status::unimplemented("Set API is not supported by this device type"))
-            }
+            // LightDevice only supports brightness and power operations
+            device::DeviceHandler::Light(handler) => {
+                let mut info = self.get_state().await.get_info_silent(&device).await?;
+                // since `map_tapo_err` needs mutable reference on device we can call it only once
+                // therefore we store the result of
+                let mut err: Option<tapo::Error> = None;
+
+                if let Some(change) = brightness {
+                    let current = get_transformed_brightness(&info.clone(), change);
+                    match handler.set_brightness(current).await {
+                        Ok(_) => {
+                            info.brightness = Some(current as u32);
+                            info.device_on = Some(true);
+                            info.on_time = info.on_time.or(Some(0));
+                        },
+                        Err(error) => {
+                            err = err.or(Some(error));
+                        }
+                    }
+                };
+                if let Some(power) = inner.power {
+                    if power {
+                        match handler.on().await {
+                            Ok(_) => {
+                                info.device_on = Some(true);
+                                info.on_time = info.on_time.or(Some(0));
+                            },
+                            Err(error) => {
+                                err = err.or(Some(error));
+                            }
+                        }
+                    } else {
+                        match handler.off().await {
+                            Ok(_) => {
+                                info.device_on = Some(false);
+                                info.on_time = info.on_time.or(Some(0));
+                            },
+                            Err(error) => {
+                                err = err.or(Some(error));
+                            }
+                        }
+                    }
+                }
+
+                self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
+
+                if let Some(err) = err {
+                    Err(err).map_tapo_err(&mut device).await?;
+                };
+
+                Ok(Response::new(info))
+            },
+            // GenericDevice only supports power operations
+            device::DeviceHandler::Generic(handler) => {
+                let mut info = self.get_state().await.get_info_silent(&device).await?;
+                if let Some(power) = inner.power {
+                    if power {
+                        handler.on().await.map_tapo_err(&mut device).await?;
+                        info.device_on = Some(true);
+                        info.on_time = info.on_time.or(Some(0));
+                    } else {
+                        handler.off().await.map_tapo_err(&mut device).await?;
+                        info.device_on = Some(false);
+                        info.on_time = None;
+                    }
+                }
+
+                self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
+                Ok(Response::new(info))
+            },
         }
     }
 }

@@ -184,16 +184,6 @@ impl Device {
             None => Err(Status::unauthenticated(format!("The device '{}' is currently unauthenticated. Try again later or verify the configuration should the issue persist.", self.name)))
         }
     }
-
-    /// Mutable access to current device handler
-    ///
-    /// Returns tonic status code should the handler be unavailable
-    pub fn get_handler_mut(&mut self) -> Result<&mut DeviceHandler, Status> {
-        match &mut self.handler {
-            Some(handler) => Ok(handler),
-            None => Err(Status::unauthenticated(format!("The device '{}' is currently unauthenticated. Try again later or verify the configuration should the issue persist.", self.name)))
-        }
-    }
 }
 
 pub enum DeviceHandler {

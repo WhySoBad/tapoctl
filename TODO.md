@@ -3,6 +3,6 @@
 * [x] Keep devices into which the server cannot login in the devices list -> For completeness reasons
 * [ ] Add device groups to control multiple devices at once
 * [ ] Add some kind of metrics about devices
-* [ ] Implement `set` for non-color bulbs
+* [x] Implement `set` for non-color bulbs
 * [x] Write docs
 * [x] Better handling for expired sessions (SessionTimeout)

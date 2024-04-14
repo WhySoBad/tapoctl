@@ -24,14 +24,11 @@ Additionally, should the cli not meet your needs the use of protocol buffers all
 
 ## Supported devices
 
-Currently, the following light bulbs are supported:
+The following tapo smart light bulbs are supported:
 
 * L530
 * L630
 * L900
-
-For the following devices the support is coming soon™:
-
 * L510
 * L520
 * L610

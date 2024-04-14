@@ -47,7 +47,7 @@ nmcli con modify tapoctl-hotspot wifi-sec.psk "<password>"
 nmcli con up tapoctl-hotspot
 ```
 
-To disable the internet access for this connection we have to add an iptable rule which drops all packets
+To disable the internet access for this connection we have to add an iptables rule which drops all packets
 which go from the `wlan0` interface to the `eth0` interface. By adding the following rule to the iptables we achieve the desired behavior:
 
 ```bash
@@ -86,7 +86,7 @@ services:
 ```
 
 >[!NOTE]
-> Should've compiled the tapoctl binary yourself on the Raspberry Pi you can start the server using `tapoctl serve -c path/to/config.toml`
+> In case you've compiled the tapoctl binary yourself you can start the server using `tapoctl serve -c path/to/config.toml`
 
 After starting the server you'll see your devices using:
 ```bash

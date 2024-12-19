@@ -9,6 +9,7 @@ depends=()
 makedepends=(cargo-nightly protobuf)
 source=("$pkgname::git+https://github.com/WhySoBad/tapoctl.git")
 md5sums=('SKIP')
+options=(!lto)
 
 pkgver() {
     cd "$pkgname"

@@ -148,11 +148,11 @@ message InfoJsonResponse {
 // Representation for the usage of a unit in the last day, week and month
 message UsagePerPeriod {
   // How much the unit was used today
-  uint64 today = 1;
+  optional uint64 today = 1;
   // How much the unit was used within the last week
-  uint64 week = 2;
+  optional uint64 week = 2;
   // How much the unit was used within the last month
-  uint64 month = 3;
+  optional uint64 month = 3;
 }
 
 // Response to the device usage request which returns some statistics about the usage

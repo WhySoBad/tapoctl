@@ -222,28 +222,31 @@ impl Display for UsageResponse {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut lines = vec![];
         if let Some(time) = &self.time_usage {
+            let convert_time = |t| format!("{:.2}h", t as f32 / 60f32).into();
             lines.push("Uptime:".underline().bold().to_string());
-            lines.push(format!("{}: {:.2}h", "Today".bold(), time.today as f32 / 60f32));
-            lines.push(format!("{}: {:.2}h", "Week".bold(), time.week as f32 / 60f32));
-            lines.push(format!("{}: {:.2}h", "Month".bold(), time.month as f32 / 60f32));
+            lines.push(format!("{}: {}", "Today".bold(), time.today.map_or("No information".dimmed(), convert_time)));
+            lines.push(format!("{}: {:.2}h", "Week".bold(), time.week.map_or("No information".dimmed(), convert_time)));
+            lines.push(format!("{}: {:.2}h", "Month".bold(), time.month.map_or("No information".dimmed(), convert_time)));
         }
         if let Some(power) = &self.power_usage {
             if !lines.is_empty() {
                 lines.push(String::new());
             }
+            let convert_power = |p: u64| format!("{:.3}kWh", p as f32 / 1000f32).into();
             lines.push("Power used:".underline().bold().to_string());
-            lines.push(format!("{}: {:.3}kWh", "Today".bold(), power.today as f32 / 1000f32));
-            lines.push(format!("{}: {:.3}kWh", "Week".bold(), power.week as f32 / 1000f32));
-            lines.push(format!("{}: {:.3}kWh", "Month".bold(), power.month as f32 / 1000f32));
+            lines.push(format!("{}: {}", "Today".bold(), power.today.map_or("No information".dimmed(), convert_power)));
+            lines.push(format!("{}: {:.3}kWh", "Week".bold(), power.week.map_or("No information".dimmed(), convert_power)));
+            lines.push(format!("{}: {:.3}kWh", "Month".bold(), power.month.map_or("No information".dimmed(), convert_power)));
         }
         if let Some(saved) = &self.saved_power {
             if !lines.is_empty() {
                 lines.push(String::new());
             }
+            let convert_power = |p: u64| format!("{:.3}kWh", p as f32 / 1000f32).into();
             lines.push("Power saved:".underline().bold().to_string());
-            lines.push(format!("{}: {:.3}kWh", "Today".bold(), saved.today as f32 / 1000f32));
-            lines.push(format!("{}: {:.3}kWh", "Week".bold(), saved.week as f32 / 1000f32));
-            lines.push(format!("{}: {:.3}kWh", "Month".bold(), saved.month as f32 / 1000f32));
+            lines.push(format!("{}: {}", "Today".bold(), saved.today.map_or("No information".dimmed(), convert_power)));
+            lines.push(format!("{}: {:.3}kWh", "Week".bold(), saved.week.map_or("No information".dimmed(), convert_power)));
+            lines.push(format!("{}: {:.3}kWh", "Month".bold(), saved.month.map_or("No information".dimmed(), convert_power)));
         }
         f.write_str(lines.join("\n").as_str())
     }

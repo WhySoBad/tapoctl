@@ -35,10 +35,10 @@ impl Device {
     pub async fn new(name: String, definition: DeviceDefinition, client: ApiClient, sender: EventSender) -> Option<Self> {
         let handler = Self::acquire_handler(&definition.r#type, &definition.address, client.clone()).await;
 
-        if handler.is_ok() {
-            info!("Logged into device '{name}'")
+        if let Err(err) = &handler {
+            warn!("Unable to log into device '{name}': {err}. Retrying on next access...")
         } else {
-            warn!("Unable to log into device '{name}'. Retrying on next access...")
+            info!("Logged into device {name}");
         }
 
         let next_session_action = if handler.is_ok() {
@@ -68,9 +68,6 @@ impl Device {
             },
             SupportedDevice::L630 => {
                 client.l630(address).await.map_err(|err| Status::internal(err.to_string())).map(DeviceHandler::ColorLight)
-            },
-            SupportedDevice::L900 => {
-                client.l900(address).await.map_err(|err| Status::internal(err.to_string())).map(DeviceHandler::ColorLight)
             },
             SupportedDevice::L510 => {
                 client.l510(address).await.map_err(|err| Status::internal(err.to_string())).map(DeviceHandler::Light)

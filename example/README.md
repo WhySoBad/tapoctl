@@ -36,23 +36,20 @@ After configuring the `dnsmasq.service` should be started/enabled
 
 ## Creating hotspot
 
-We use NetworkManager to create the hotspot. The full example setup can be found [here](https://gist.github.com/narate/d3f001c97e1c981a59f94cd76f041140).
+We use NetworkManager to create the hotspot. The full examples can be found [here](https://gist.github.com/narate/d3f001c97e1c981a59f94cd76f041140) and [here](https://raspberrypi.stackexchange.com/questions/149425/networkmanager-wifi-access-point-disable-internet-connection-sharing).
 The example below creates a new connection named `tapoctl-hotspot` on the `wlan0` interface:
 
 ```bash
 nmcli con add type wifi ifname wlan0 con-name tapoctl-hotspot autoconnect yes ssid tapoctl
-nmcli con modify tapoctl-hotspot 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method shared
+nmcli con modify tapoctl-hotspot 802-11-wireless.mode ap 802-11-wireless.band bg ipv4.method manual ipv4.addresses 10.255.255.0/24
 nmcli con modify tapoctl-hotspot wifi-sec.key-mgmt wpa-psk
 nmcli con modify tapoctl-hotspot wifi-sec.psk "<password>"
 nmcli con up tapoctl-hotspot
 ```
 
-To disable the internet access for this connection we have to add an iptables rule which drops all packets
-which go from the `wlan0` interface to the `eth0` interface. By adding the following rule to the iptables we achieve the desired behavior:
+> Note the `ipv4.addresses` option specifies the addresses on which the dnsmasq dhcp server listens. In this case it's `10.255.55.0/24`.
 
-```bash
-sudo iptables -I FORWARD -i wlan0 -o eth0 -j REJECT;
-```
+By setting the `ipv4.method` to `manual` we disabled internet access for the hotspot. 
 
 Now you're ready to pair your light bulbs using the official Tapo app with the newly created WiFi hotspot. After entering the network credentials the Tapo app will show 
 an error indicating the pairing wasn't successfully. This error can simply be ignored since the reason for the error is the Tapo app not being able to communicate with the devices

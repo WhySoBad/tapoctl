@@ -7,7 +7,7 @@ Control your tapo light bulbs from anywhere on your local network using the comm
 I wanted to control my tapo light bulbs from my local network but without the necessity of granting them access to my local network (or to the internet at all).
 Additionally, I wanted to be able to control by light bulbs from the command line.
 
-The idea behind this project is to create a gRPC [server](#server) which can be hosted on a local device (see [example setup](/example)) and which is connected 
+The idea behind this project is to create a [gRPC server](#server) which can be hosted on a local device (see [example setup with a Raspberry Pi](/example)) and which is connected 
 to both your local network and the network containing the light bulbs. It then acts as a proxy and allows you to control
 your light bulbs from anywhere on your local network without using the proprietary app.
 
@@ -28,15 +28,13 @@ The following tapo smart light bulbs are supported:
 
 * L530
 * L630
-* L900
 * L510
 * L520
 * L610
 * Generic light bulbs with limited feature set
 
-Since I only own some `L530` smart bulbs I can only test the `Generic` and `L530` type. The other light bulb types should work 
-as expected since the `L530` seems to have a superset of functionalities. The `L900` light strips may have only limited functionality 
-since the whole project is focused on light bulbs. 
+> Since I only own some `L530` smart bulbs I can only test the `Generic` and `L530` type. The other light bulb types should work 
+as expected since the `L530` seems to have a superset of functionalities. 
 
 The provided feature and device support of tapoctl is based off the feature matrix of the [tapo crate](https://crates.io/crates/tapo) which is used internally.
 
@@ -46,29 +44,27 @@ If any functionality or your device is missing please open an issue or submit a 
 
 The cli supports the following commands:
 
-* `devices`: List all devices registered on the server
-* `events`: Subscribe to live events (device change, auth change) 
-* `set <device>`: Update one or more properties of a light bulb <br>
-    `--brightness`: Brightness value between 1 and 100<br>
-    `--hue`: Hue value between 1 and 360<br>
-    `--saturation`: Saturation value between 1 and 100<br>
-    `--temperature`: Set color temperature to value between 2500K and 6500K<br>
-    `--color`: Set predefined google home color<br>
-    `--power`: Boolean whether to turn the lamp on/off
-* `info <device>`: Print current state of a light bulb
-* `usage <device>`: Print energy and time usage information for a light bulb
-* `on <device>`: Turn light bulb on
-* `off <device>`: Turn light bulb off
-* `reset <device>`: Reset light bulb to factory defaults
-* `serve`: Start the gRPC server. More about this can be read in [the server section](#server) <br>
-    `--port`: Port on which the server should listen
+| Command          | Description                                                                         | Arguments                                                                                                                                                                                                                                                                                                                                  |
+|------------------|-------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `devices`        | List all devices registered on the server                                           |                                                                                                                                                                                                                                                                                                                                            |
+| `events`         | Subscribe to live events                                                            |                                                                                                                                                                                                                                                                                                                                            |
+| `set <device>`   | Update one or more properties of the light bulb                                     | `--brightness`: Brightness value between 1 and 100 <br> `--hue`: Hue value between 1 and 360 <br> `--saturation`: Saturation value between 1 and 100 <br> `--temperature`: Set color temperature to value between 2500K and 6500K <br> `--color`: Set predefined google home color <br> `--power`: Boolean whether to turn the lamp on/off |
+| `info <device>`  | Print current state of the light bulb                                               |                                                                                                                                                                                                                                                                                                                                            |
+| `usage <device>` | Print energy and time usage information for the light bulb                          |                                                                                                                                                                                                                                                                                                                                            |
+| `on <device>`    | Turn the device on                                                                  |                                                                                                                                                                                                                                                                                                                                            |
+| `off <device>`   | Turn the device off                                                                 |                                                                                                                                                                                                                                                                                                                                            | 
+| `reset <device>` | Reset the light bulb to factory defaults                                            |                                                                                                                                                                                                                                                                                                                                            | 
+| `serve`          | Start the gRPC server. More about this can be read in [the server section](#server) | `--port`: Port on which the server should listen                                                                                                                                                                                                                                                                                           |
 
-Additionally, there are some global arguments which work on all commands:
-* `--config`: Path to the configuration file which should be used
-* `--json`: Print the response from the server as json should there be one
-* `--address`: Address used for connecting to the gRPC server
-* `--port`: Port used for connecting to the gRPC server
-* `--secure`: Use https instead of http to connect to the gRPC server
+Additionally, there are some global arguments which work with all commands:
+
+| Argument    | Description                                                    |
+|-------------|----------------------------------------------------------------|
+| `--config`  | Path to the configuration file which should be used            |
+| `--json`    | Print the response from the server as json should there be one |
+| `--address` | Address used for connecting to the gRPC server                 |
+| `--port`    | Port used for connecting to the gRPC server                    |
+| `--secure`  | Use https instead of http to connect to the gRPC server        |    
 
 ### Configuration
 

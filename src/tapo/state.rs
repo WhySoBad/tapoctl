@@ -73,7 +73,6 @@ impl State {
                 InfoResponse {
                     device_on: info.device_on,
                     on_time: info.on_time,
-                    overheated: info.overheated,
                     name: device.name.clone(),
                     ..InfoResponse::default()
                 }

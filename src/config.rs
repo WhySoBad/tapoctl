@@ -61,7 +61,6 @@ pub struct DeviceDefinition {
 pub enum SupportedDevice {
     L530,
     L630,
-    L900,
     L510,
     L520,
     L610,

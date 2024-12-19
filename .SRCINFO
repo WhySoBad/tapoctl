@@ -1,0 +1,14 @@
+pkgbase = tapoctl-git
+	pkgdesc = grpc server and cli for tapo bulbs
+	pkgver = v0.1.0.r2.g226af7a
+	pkgrel = 1
+	url = https://github.com/WhySoBad/tapoctl
+	arch = x86_64
+	license = MIT
+	makedepends = cargo-nightly
+	makedepends = protobuf
+	options = !lto
+	source = tapoctl-git::git+https://github.com/WhySoBad/tapoctl.git
+	md5sums = SKIP
+
+pkgname = tapoctl-git

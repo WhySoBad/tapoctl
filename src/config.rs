@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
 use anyhow::Context;
+use enum_stringify::EnumStringify;
 use log::{debug, error};
 use serde::Deserialize;
 
@@ -53,11 +54,12 @@ pub struct Authentication {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct DeviceDefinition {
-    pub r#type: SupportedDevice,
+    #[serde(rename = "type")]
+    pub device_type: SupportedDevice,
     pub address: String
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, EnumStringify)]
 pub enum SupportedDevice {
     L530,
     L630,

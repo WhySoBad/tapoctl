@@ -2,16 +2,16 @@ use std::cmp::{max, min};
 use std::collections::HashMap;
 use std::sync::Arc;
 use futures::future::join_all;
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{RwLock, RwLockWriteGuard};
 use tonic::{Request, Response, Status};
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use rpc::tapo_server::Tapo;
-use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, EventRequest, EventResponse, InfoJsonResponse, InfoResponse, IntegerValueChange, PowerResponse, SetRequest, UsagePerPeriod, UsageResponse};
-use crate::device;
+use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, EventRequest, EventResponse, InfoJsonResponse, InfoResponse, PowerResponse, SetRequest, UsageResponse};
 use crate::device::Device;
-use crate::tapo::{TapoErrMap, transform_color, transform_session_status};
-use crate::tapo::color::{any_to_rgb, color_to_hst};
+use crate::tapo::{TapoRpcColorExt, TapoColorExt};
 use crate::tapo::state::State;
+
+use super::{TapoDeviceExt, TapoSessionStatusExt};
 
 pub mod rpc {
     tonic::include_proto!("tapo");
@@ -23,57 +23,54 @@ pub type EventChannel = (EventSender, EventReceiver);
 
 #[derive(Clone)]
 pub struct TapoService {
-    devices: Arc<HashMap<String, Arc<Mutex<Device>>>>,
-    state: Arc<Mutex<State>>,
+    devices: Arc<HashMap<String, Arc<RwLock<Device>>>>,
+    state: Arc<RwLock<State>>,
     channel: Arc<EventChannel>
 }
 
 impl TapoService {
-    pub fn new(devices: HashMap<String, Arc<Mutex<Device>>>, channel: EventChannel) -> Self {
+    pub fn new(devices: HashMap<String, Arc<RwLock<Device>>>, channel: EventChannel) -> Self {
         Self {
             devices: Arc::new(devices),
-            state: Arc::new(Mutex::new(State::new(channel.0.clone()))),
+            state: Arc::new(RwLock::new(State::new(channel.0.clone()))),
             channel: Arc::new(channel)
         }
     }
 
-    async fn get_device_by_name(&self, name: &String) -> Result<Arc<Mutex<Device>>, Status> {
+    async fn get_device_by_name(&self, name: &String) -> Result<Arc<RwLock<Device>>, Status> {
         match self.devices.get(name) {
             Some(dev) => Ok(dev.clone()),
             None => Err(Status::not_found(format!("Device '{name}' could not be found")))
         }
     }
 
-    async fn get_state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().await
+    async fn get_state_mut(&self) -> RwLockWriteGuard<'_, State> {
+        self.state.write().await
     }
 }
 
 #[tonic::async_trait]
 impl Tapo for TapoService {
+    /// Get a list of all devices available on the server
     async fn devices(&self, _: Request<Empty>) -> Result<Response<DevicesResponse>, Status> {
-
-        let map_async = self.devices.values().map(|dev| dev.lock()).collect::<Vec<_>>();
+        let map_async = self.devices.values().map(|dev| dev.read()).collect::<Vec<_>>();
         let devices = join_all(map_async).await.into_iter()
             .map(|dev| {
                 rpc::Device {
                     name: dev.name.clone(),
-                    r#type: format!("{:?}", dev.r#type),
+                    r#type: dev.device_type.to_string(),
                     address: dev.address.clone(),
-                    status: i32::from(transform_session_status(&dev.session_status))
+                    status: dev.session_status.rpc().into()
                 }
             })
             .collect::<Vec<_>>();
 
-        let response = DevicesResponse {
-            devices
-        };
-
-        Ok(Response::new(response))
+        Ok(Response::new(DevicesResponse { devices }))
     }
 
     type EventsStream = ReceiverStream<Result<EventResponse, Status>>;
 
+    /// Subscribe to server events
     async fn events(&self, request: Request<EventRequest>) -> Result<Response<Self::EventsStream>, Status> {
         let (tx, rx) = tokio::sync::mpsc::channel(4);
         let types = request.into_inner().types;
@@ -84,12 +81,8 @@ impl Tapo for TapoService {
             loop {
                 match receiver.recv().await {
                     Ok(event) => {
-                        if types.contains(&event.r#type) || types.is_empty() {
-                            match tx.send(Ok(event)).await {
-                                Ok(_) => {},
-                                // the stream was closed
-                                Err(_) => return
-                            }
+                        if (types.contains(&event.r#type) || types.is_empty()) && tx.send(Ok(event)).await.is_err() {
+                            return
                         }
                     },
                     Err(_) => {
@@ -103,426 +96,183 @@ impl Tapo for TapoService {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
+    /// Reset the device to it's factory defaults
     async fn reset(&self, request: Request<DeviceRequest>) -> Result<Response<Empty>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
+
         device.try_refresh_session().await?;
-
-        match device.get_handler()? {
-            device::DeviceHandler::Light(handler) => {
-                handler.device_reset().await.map_tapo_err(&mut device).await?;
-            }
-            device::DeviceHandler::ColorLight(handler) => {
-               handler.device_reset().await.map_tapo_err(&mut device).await?;
-            },
-            _ => {
-                return Err(Status::unimplemented("Reset API is not supported by this device type"))
-            }
-        }
-
-        Ok(Response::new(Empty {}))
+        device.reset().await
     }
 
+    /// Get some selected information about the device
     async fn info(&self, request: Request<DeviceRequest>) -> Result<Response<InfoResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
+
         device.try_refresh_session().await?;
-
-
-        let response = match device.get_handler()? {
-            device::DeviceHandler::Light(handler) => {
-                let info = handler.get_device_info().await.map_tapo_err(&mut device).await?;
-                InfoResponse {
-                    brightness: Some(info.brightness as u32),
-                    device_on: Some(info.device_on),
-                    on_time: info.on_time,
-                    name: device.name.clone(),
-                    overheated: info.overheated,
-                    ..InfoResponse::default()
-                }
-            }
-            device::DeviceHandler::Generic(handler) => {
-                let info = handler.get_device_info().await.map_tapo_err(&mut device).await?;
-                InfoResponse {
-                    device_on: info.device_on,
-                    on_time: info.on_time,
-                    name: device.name.clone(),
-                    ..InfoResponse::default()
-                }
-            }
-            device::DeviceHandler::ColorLight(handler) => {
-                let info = handler.get_device_info().await.map_tapo_err(&mut device).await?;
-                let brightness = Some(info.brightness as u32);
-                let hue = info.hue.map(|v| v as u32);
-                let saturation = info.saturation.map(|v| v as u32);
-                let temperature = Some(info.color_temp as u32);
-                InfoResponse {
-                    brightness,
-                    hue,
-                    saturation,
-                    temperature,
-                    device_on: Some(info.device_on),
-                    on_time: info.on_time,
-                    dynamic_effect_id: info.dynamic_light_effect_id,
-                    overheated: info.overheated,
-                    name: device.name.clone(),
-                    color: any_to_rgb(temperature, hue, saturation, brightness),
-                }
-            }
-        };
-
-        Ok(Response::new(response))
+        device.get_info().await
     }
 
+    /// Get all raw json information about the device
     async fn info_json(&self, request: Request<DeviceRequest>) -> Result<Response<InfoJsonResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
+
         device.try_refresh_session().await?;
-
-        let info = match device.get_handler()? {
-            device::DeviceHandler::Light(handler) => {
-                handler.get_device_info_json().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::Generic(handler) => {
-                handler.get_device_info_json().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::ColorLight(handler) => {
-                handler.get_device_info_json().await.map_tapo_err(&mut device).await?
-            }
-        };
-
-        let mut bytes = vec![];
-        serde_json::to_writer(&mut bytes, &info).unwrap_or_default();
-
-        let response = InfoJsonResponse { data: bytes };
-
-        Ok(Response::new(response))
+        device.get_info_json().await
     }
 
+    /// Get power and time usage of the device
     async fn usage(&self, request: Request<DeviceRequest>) -> Result<Response<UsageResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
+
         device.try_refresh_session().await?;
-
-        let usage = match device.get_handler()? {
-            device::DeviceHandler::Light(handler) => {
-                handler.get_device_usage().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::ColorLight(handler) => {
-                handler.get_device_usage().await.map_tapo_err(&mut device).await?
-            },
-            device::DeviceHandler::Generic(_) => {
-                return Err(Status::unimplemented("Device usage API is not supported by this device type"))
-            }
-        };
-
-        let power_usage = UsagePerPeriod {
-            today: usage.power_usage.today,
-            week: usage.power_usage.past7,
-            month: usage.power_usage.past30
-        };
-
-        let time_usage = UsagePerPeriod {
-            today: usage.time_usage.today,
-            week: usage.time_usage.past7,
-            month: usage.time_usage.past30
-        };
-
-        let saved_power = UsagePerPeriod {
-            today: usage.saved_power.today,
-            week: usage.saved_power.past7,
-            month: usage.saved_power.past30
-        };
-
-        let response = UsageResponse {
-            power_usage: Some(power_usage),
-            time_usage: Some(time_usage),
-            saved_power: Some(saved_power)
-        };
-        
-        Ok(Response::new(response))
+        device.get_usage().await
     }
 
+    /// Power the device on
     async fn on(&self, request: Request<DeviceRequest>) -> Result<Response<PowerResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
+
         device.try_refresh_session().await?;
+        let response = device.on().await?;
 
-        match device.get_handler()? {
-            device::DeviceHandler::Light(handler) => {
-                handler.on().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::Generic(handler) => {
-                handler.on().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::ColorLight(handler) => {
-                handler.on().await.map_tapo_err(&mut device).await?
-            }
-        }
-
-        let mut info = self.get_state().await.get_info(&device).await?;
+        let mut info = self.get_state_mut().await.get_info(&device).await?;
         info.device_on = Some(true);
         info.on_time = Some(0);
-        self.get_state().await.update_info_optimistically(inner.device, info);
+        self.get_state_mut().await.update_info_optimistically(inner.device, info);
 
-        Ok(Response::new(PowerResponse { device_on: true }))
+        Ok(response)
     }
 
+    /// Power the device off
     async fn off(&self, request: Request<DeviceRequest>) -> Result<Response<PowerResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
+
         device.try_refresh_session().await?;
+        let response = device.off().await?;
 
-        match device.get_handler()? {
-            device::DeviceHandler::Light(handler) => {
-                handler.off().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::Generic(handler) => {
-                handler.off().await.map_tapo_err(&mut device).await?
-            }
-            device::DeviceHandler::ColorLight(handler) => {
-                handler.off().await.map_tapo_err(&mut device).await?
-            }
-        }
-
-        let mut info = self.get_state().await.get_info(&device).await?;
+        let mut info = self.get_state_mut().await.get_info(&device).await?;
         info.device_on = Some(false);
         info.on_time = Some(0);
-        self.get_state().await.update_info_optimistically(inner.device, info);
+        self.get_state_mut().await.update_info_optimistically(inner.device, info);
 
-        Ok(Response::new(PowerResponse { device_on: false }))
+        Ok(response)
     }
 
+    /// Update one or more properties of a device in a single request
     async fn set(&self, request: Request<SetRequest>) -> Result<Response<InfoResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.lock().await;
+        let mut device = device.write().await;
         device.try_refresh_session().await?;
 
-        let mut has_relative_change = false;
-        let mut check_for_relative = |v: IntegerValueChange| {
-            has_relative_change = !v.absolute || has_relative_change;
-            v
-        };
+        let mut info = self.get_state_mut().await.get_info_silent(&device).await?;
 
-        let color = inner.color.map(|_| transform_color(inner.color()));
-        let temperature = inner.temperature.map(&mut check_for_relative);
-        let brightness = inner.brightness.map(&mut check_for_relative);
-        let (hue, saturation) = inner.hue_saturation.map(|hs| {
-            (hs.hue.map(&mut check_for_relative), hs.saturation.map(check_for_relative))
-        }).unwrap_or((None, None));
+        let mut temperature = inner.temperature
+            .map(|change| {
+                let temperature = if change.absolute { change.value as u16 }
+                else {
+                    let updated = info.temperature() as i32 + change.value;
+                    if updated.is_negative() { 2500u16 }
+                    else if updated >= u16::MAX.into() { 6500u16 }
+                    else { updated as u16 }
+                };
+                info.temperature = Some(temperature as u32);
+                temperature
+            })
+            .map(|value| max(min(value, 2500), 6500));
 
-        if let Some(change) = &temperature {
-            if change.absolute && !(2500..=6500).contains(&change.value) {
-                Err(Status::invalid_argument("Temperature has to be in range 2500 to 6500"))?
-            }
-        }
+        let brightness = inner.brightness
+            .map(|change| {
+                let brightness = if change.absolute { change.value as u8 }
+                else {
+                    let updated = info.brightness() as i32 + change.value;
+                    if updated.is_negative() { 1u8 }
+                    else if updated >= u8::MAX.into() { 100u8 }
+                    else { updated as u8 }
+                };
+                info.brightness = Some(brightness as u32);
+                brightness
+            })
+            .map(|value| max(min(value, 1), 100));
 
-        if let Some(change) = &hue {
-            if change.absolute && !(1..=360).contains(&change.value) {
-                Err(Status::invalid_argument("Hue has to be in range 1 to 360"))?
-            }
-        }
+        let mut hue_saturation = inner.hue_saturation
+            .map(|hs| {
+                let saturation = hs.saturation
+                    .map(|change| {
+                        let saturation = if change.absolute { change.value as u8 }
+                        else {
+                            let updated = info.saturation() as i32 + change.value;
+                            if updated.is_negative() { 1u8 }
+                            else if updated >= u8::MAX.into() { 100u8 }
+                            else { updated as u8 }
+                        };
+                        info.saturation = Some(saturation as u32);
+                        saturation
+                    })
+                    .map(|value| max(min(value, 1), 100));
 
-        if let Some(change) = &saturation {
-            if change.absolute && !(1..=100).contains(&change.value) {
-                Err(Status::invalid_argument("Saturation has to be in range 1 to 100"))?
-            }
-        }
+                let hue = hs.hue
+                    .map(|change| {
+                        let hue = if change.absolute { change.value as u16 }
+                        else {
+                            let updated = info.saturation() as i32 + change.value;
+                            if updated.is_negative() { (360 + (updated % 360)) as u16 }
+                            else { (updated % 360) as u16 }
+                        };
+                        info.hue = Some(hue as u32);
+                        hue
+                    });
+                hue.zip(saturation)
+            })
+            .unwrap_or_default();
 
-        if let Some(change) = &brightness {
-            if change.absolute && !(1..=100).contains(&change.value) {
-                Err(Status::invalid_argument("Brightness has to be in range 1 to 100"))?
-            }
-        }
+        let color = inner.color
+            .map(|c| rpc::Color::try_from(c).map(|c| c.tapo_color()).ok())
+            .flatten();
 
-        fn get_transformed_brightness(info: &InfoResponse, change: IntegerValueChange) -> u8 {
-            let mut current = u8::try_from(info.brightness.unwrap_or_default()).unwrap_or_default();
-            if change.absolute {
-                current = u8::try_from(change.value).unwrap_or_default();
+        // the provided color always takes predecence over hue, saturation and
+        // temperature arguments
+        if let Some(color) = &color {
+            let (h, s, t) = color.hst();
+            if h > 0 {
+                temperature = None;
+                hue_saturation = Some((h, s));
+                info.hue = Some(h as u32);
+                info.saturation = Some(s as u32);
+                info.temperature = None;
             } else {
-                let change_abs = u8::try_from(max(min(change.value.abs(), 100), 1)).unwrap_or_default();
-                if change.value.is_negative() {
-                    current -= change_abs;
-                } else {
-                    current += change_abs;
-                }
+                temperature = Some(t);
+                hue_saturation = None;
+                info.hue = None;
+                info.saturation = None;
+                info.temperature = Some(t as u32);
             }
-            min(max(current, 1), 100)
         }
 
-        match device.get_handler()? {
-            device::DeviceHandler::ColorLight(handler) => {
-                let mut info = self.get_state().await.get_info_silent(&device).await?;
+        let power = inner.power;
 
-                let mut set = handler.set();
-                if let Some(change) = brightness {
-                    let current = get_transformed_brightness(&info, change);
-                    set = set.brightness(current);
-                    info.brightness = Some(current as u32);
-                    info.device_on = Some(true);
-                    info.on_time = info.on_time.or(Some(0));
-                };
-                if let Some((change_hue, change_saturation)) = hue.zip(saturation) {
-                    let mut current_hue = u16::try_from(info.hue.unwrap_or_default()).unwrap_or_default();
-                    let mut current_saturation = u8::try_from(info.saturation.unwrap_or_default()).unwrap_or_default();
-                    if change_hue.absolute {
-                        current_hue = u16::try_from(change_hue.value).unwrap_or_default();
-                    } else {
-                        let change = u16::try_from((change_hue.value % 360).abs()).unwrap_or_default();
-                        if change_hue.value.is_negative() {
-                            current_hue -= change;
-                        } else {
-                            current_hue += change;
-                        }
-                        current_hue %= 360;
-                        if current_hue == 0 {
-                            current_hue = 360;
-                        }
-                    }
-                    if change_saturation.absolute {
-                        current_saturation = u8::try_from(change_saturation.value).unwrap_or_default();
-                    } else {
-                        let change = u8::try_from(max(min(change_saturation.value.abs(), 100), 1)).unwrap_or_default();
-                        if change_saturation.value.is_negative() {
-                            current_saturation -= min(change, current_saturation - 1);
-                        } else {
-                            current_saturation += min(change, 100 - current_saturation);
-                        }
-                    }
-                    current_hue = min(max(current_hue, 1), 360);
-                    set = set.hue_saturation(current_hue, current_saturation);
-                    info.hue = Some(current_hue as u32);
-                    info.saturation = Some(current_saturation as u32);
-                    info.device_on = Some(true);
-                    info.temperature = Some(0);
-                    info.on_time = info.on_time.or(Some(0));
-                };
-                if let Some(change) = temperature {
-                    let mut current = u16::try_from(info.temperature.unwrap_or_default()).unwrap_or_default();
-                    if change.absolute {
-                        current = u16::try_from(change.value).unwrap_or_default();
-                    } else {
-                        let change_abs = u16::try_from(max(min(change.value.abs(), 6500), 2500)).unwrap_or_default();
-                        if change.value.is_negative() {
-                            current -= change_abs;
-                        } else {
-                            current += change_abs;
-                        }
-                    }
-                    current = min(max(current, 2500), 6500);
-                    set = set.color_temperature(current);
-                    info.temperature = Some(current as u32);
-                    info.hue = None;
-                    info.saturation = None;
-                    info.device_on = Some(true);
-                    info.on_time = info.on_time.or(Some(0));
-                }
-                if let Some(color) = color {
-                    set = set.color(color.clone());
-                    info.device_on = Some(true);
-                    let (hue, saturation, temperature) = color_to_hst(color);
-                    if hue > 0 {
-                        info.hue = Some(hue);
-                        info.saturation = Some(saturation);
-                    } else {
-                        info.hue = None;
-                        info.saturation = None;
-                    }
-                    info.temperature = Some(temperature);
-                };
-                if let Some(power) = inner.power {
-                    if power {
-                        set = set.on();
-                        info.device_on = Some(true);
-                        info.on_time = info.on_time.or(Some(0));
-                    } else {
-                        set = set.off();
-                        info.device_on = Some(false);
-                        info.on_time = None;
-                    }
-                }
-                info.color = any_to_rgb(info.temperature, info.hue, info.saturation, info.brightness);
-                set.send(handler).await.map_tapo_err(&mut device).await?;
-                self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
-                Ok(Response::new(info))
-            }
-            // LightDevice only supports brightness and power operations
-            device::DeviceHandler::Light(handler) => {
-                let mut info = self.get_state().await.get_info_silent(&device).await?;
-                // since `map_tapo_err` needs mutable reference on device we can call it only once
-                // therefore we store the result of
-                let mut err: Option<tapo::Error> = None;
-
-                if let Some(change) = brightness {
-                    let current = get_transformed_brightness(&info.clone(), change);
-                    match handler.set_brightness(current).await {
-                        Ok(_) => {
-                            info.brightness = Some(current as u32);
-                            info.device_on = Some(true);
-                            info.on_time = info.on_time.or(Some(0));
-                        },
-                        Err(error) => {
-                            err = err.or(Some(error));
-                        }
-                    }
-                };
-                if let Some(power) = inner.power {
-                    if power {
-                        match handler.on().await {
-                            Ok(_) => {
-                                info.device_on = Some(true);
-                                info.on_time = info.on_time.or(Some(0));
-                            },
-                            Err(error) => {
-                                err = err.or(Some(error));
-                            }
-                        }
-                    } else {
-                        match handler.off().await {
-                            Ok(_) => {
-                                info.device_on = Some(false);
-                                info.on_time = info.on_time.or(Some(0));
-                            },
-                            Err(error) => {
-                                err = err.or(Some(error));
-                            }
-                        }
-                    }
-                }
-
-                self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
-
-                if let Some(err) = err {
-                    Err(err).map_tapo_err(&mut device).await?;
-                };
-
-                Ok(Response::new(info))
-            },
-            // GenericDevice only supports power operations
-            device::DeviceHandler::Generic(handler) => {
-                let mut info = self.get_state().await.get_info_silent(&device).await?;
-                if let Some(power) = inner.power {
-                    if power {
-                        handler.on().await.map_tapo_err(&mut device).await?;
-                        info.device_on = Some(true);
-                        info.on_time = info.on_time.or(Some(0));
-                    } else {
-                        handler.off().await.map_tapo_err(&mut device).await?;
-                        info.device_on = Some(false);
-                        info.on_time = None;
-                    }
-                }
-
-                self.get_state().await.update_info_optimistically(device.name.clone(), info.clone());
-                Ok(Response::new(info))
-            },
+        if color.is_some() || hue_saturation.is_some() || temperature.is_some() || brightness.is_some() || power.is_some_and(|v| v)  {
+            info.on_time = info.on_time.or(Some(0));
+            info.device_on = Some(true);
+        } else if power.is_some_and(|v| !v) {
+            info.on_time = None;
+            info.device_on = Some(false);
         }
+
+        let response = device.set(info, power, brightness, temperature, hue_saturation).await?;
+        self.get_state_mut().await.update_info_optimistically(device.name.clone(), response.get_ref().clone());
+        Ok(response)
     }
 }

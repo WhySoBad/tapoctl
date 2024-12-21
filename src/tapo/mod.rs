@@ -1,28 +1,29 @@
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
-use colored::{Colorize, CustomColor};
-use colorsys::Rgb;
 use log::{error, info};
 use serde::Serialize;
 use serde_json::json;
+use server::rpc::{Empty, InfoJsonResponse, PowerResponse, UsageResponse};
 use spinoff::Spinner;
-use tapo::{ApiClient, TapoResponseError};
-use tokio::sync::Mutex;
+use tapo::ApiClient;
+use tokio::sync::RwLock;
 use tonic::transport::Server;
+use tonic::Response;
 use crate::cli::SpinnerOpt;
 use crate::config::ServerConfig;
-use crate::device;
 use crate::device::Device;
-use crate::tapo::server::rpc::{Color, EventResponse, EventType, InfoResponse, SessionStatus, UsageResponse};
+use crate::tapo::server::rpc::{EventResponse, EventType, InfoResponse, SessionStatus};
 use crate::tapo::server::rpc::tapo_server::TapoServer;
 use crate::tapo::server::{rpc, TapoService};
 
 pub mod server;
 mod color;
 mod state;
+mod print;
+mod device;
+mod validation;
 
 pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
     let Some(config) = config else {
@@ -30,7 +31,7 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
         exit(1);
     };
 
-    let mut devices = HashMap::<String, Arc<Mutex<Device>>>::new();
+    let mut devices = HashMap::<String, Arc<RwLock<Device>>>::new();
     let (tx, rx) = tokio::sync::broadcast::channel(10);
 
     info!("Starting device login phase");
@@ -45,7 +46,7 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
     futures::future::join_all(devices_async).await.into_iter()
         .flatten()
         .for_each(|dev| {
-            devices.insert(dev.name.clone(), Arc::new(Mutex::new(dev)));
+            devices.insert(dev.name.clone(), Arc::new(RwLock::new(dev)));
         });
 
     info!("Finished device login phase");
@@ -72,68 +73,99 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
     }
 }
 
-/// ugly solution to transform tonic colors to tapo colors since the map is crate public
-fn transform_color(color: Color) -> tapo::requests::Color {
-    match color {
-        Color::CoolWhite => tapo::requests::Color::CoolWhite,
-        Color::Daylight => tapo::requests::Color::Daylight,
-        Color::Ivory => tapo::requests::Color::Ivory,
-        Color::WarmWhite => tapo::requests::Color::WarmWhite,
-        Color::Incandescent => tapo::requests::Color::Incandescent,
-        Color::Candlelight => tapo::requests::Color::Candlelight,
-        Color::Snow => tapo::requests::Color::Snow,
-        Color::GhostWhite => tapo::requests::Color::GhostWhite,
-        Color::AliceBlue => tapo::requests::Color::AliceBlue,
-        Color::LightGoldenrod => tapo::requests::Color::LightGoldenrod,
-        Color::LemonChiffon => tapo::requests::Color::LemonChiffon,
-        Color::AntiqueWhite => tapo::requests::Color::AntiqueWhite,
-        Color::Gold => tapo::requests::Color::Gold,
-        Color::Peru => tapo::requests::Color::Peru,
-        Color::Chocolate => tapo::requests::Color::Chocolate,
-        Color::SandyBrown => tapo::requests::Color::SandyBrown,
-        Color::Coral => tapo::requests::Color::Coral,
-        Color::Pumpkin => tapo::requests::Color::Pumpkin,
-        Color::Tomato => tapo::requests::Color::Tomato,
-        Color::Vermilion => tapo::requests::Color::Vermilion,
-        Color::OrangeRed => tapo::requests::Color::OrangeRed,
-        Color::Pink => tapo::requests::Color::Pink,
-        Color::Crimson => tapo::requests::Color::Crimson,
-        Color::DarkRed => tapo::requests::Color::DarkRed,
-        Color::HotPink => tapo::requests::Color::HotPink,
-        Color::Smitten => tapo::requests::Color::Smitten,
-        Color::MediumPurple => tapo::requests::Color::MediumPurple,
-        Color::BlueViolet => tapo::requests::Color::BlueViolet,
-        Color::Indigo => tapo::requests::Color::Indigo,
-        Color::LightSkyBlue => tapo::requests::Color::LightSkyBlue,
-        Color::CornflowerBlue => tapo::requests::Color::CornflowerBlue,
-        Color::Ultramarine => tapo::requests::Color::Ultramarine,
-        Color::DeepSkyBlue => tapo::requests::Color::DeepSkyBlue,
-        Color::Azure => tapo::requests::Color::Azure,
-        Color::NavyBlue => tapo::requests::Color::NavyBlue,
-        Color::LightTurquoise => tapo::requests::Color::LightTurquoise,
-        Color::Aquamarine => tapo::requests::Color::Aquamarine,
-        Color::Turquoise => tapo::requests::Color::Turquoise,
-        Color::LightGreen => tapo::requests::Color::LightGreen,
-        Color::Lime => tapo::requests::Color::Lime,
-        Color::ForestGreen => tapo::requests::Color::ForestGreen,
-    }
-}
-
-pub fn transform_session_status(session_status: &device::SessionStatus) -> SessionStatus {
-    match session_status { 
-        device::SessionStatus::Authenticated => SessionStatus::Authenticated,
-        device::SessionStatus::Failure => SessionStatus::Failure,
-        device::SessionStatus::RepeatedFailure => SessionStatus::RepeatedFailure,
-    }
-}
-
 pub fn create_event(event_type: EventType, body: impl Serialize) -> EventResponse {
     let mut bytes = vec![];
     serde_json::to_writer(&mut bytes, &body).unwrap_or_default();
     EventResponse { body: bytes, r#type: i32::from(event_type) }
 }
 
+pub trait TapoRpcColorExt {
+    /// Get the tapo library color representation of the color
+    fn tapo_color(&self) -> tapo::requests::Color;
+}
+
+pub trait TapoColorExt {
+    /// Get the hue, saturation and temperature (kelvin) of the color
+    fn hst(&self) -> (u16, u8, u16);
+}
+
+pub trait TapoSessionStatusExt {
+    /// Get the rpc representation of the session status
+    fn rpc(&self) -> rpc::SessionStatus;
+}
+
+impl TapoSessionStatusExt for crate::device::SessionStatus {
+    fn rpc(&self) -> rpc::SessionStatus {
+        match self {
+            crate::device::SessionStatus::Authenticated => SessionStatus::Authenticated,
+            crate::device::SessionStatus::Failure => SessionStatus::Failure,
+            crate::device::SessionStatus::RepeatedFailure => SessionStatus::RepeatedFailure,
+        }
+    }
+}
+
+pub trait TapoDeviceExt {
+    /// Reset the device to factory defaults
+    async fn reset(&self) -> Result<Response<Empty>, tonic::Status>;
+
+    /// Get some information about the device
+    async fn get_info(&self) -> Result<Response<InfoResponse>, tonic::Status>;
+
+    /// Get all information as raw json about the device
+    async fn get_info_json(&self) -> Result<Response<InfoJsonResponse>, tonic::Status>;
+
+    /// Get the power and energy usage of the device
+    async fn get_usage(&self) -> Result<Response<UsageResponse>, tonic::Status>;
+
+    /// Power the device on
+    async fn on(&self) -> Result<Response<PowerResponse>, tonic::Status>;
+
+    /// Power the device off
+    async fn off(&self) -> Result<Response<PowerResponse>, tonic::Status>;
+
+    /// Set multiple properties of the device at once
+    async fn set(
+        &self,
+        info: InfoResponse,
+        power: Option<bool>,
+        brightness: Option<u8>,
+        temperature: Option<u16>,
+        hue_saturation: Option<(u16, u8)>
+    ) -> Result<Response<InfoResponse>, tonic::Status>;
+}
+
+pub trait TapoDeviceHandlerExt {
+    /// Reset the device to factory defaults
+    async fn reset(&self, device: &Device) -> Result<(), tonic::Status>;
+
+    /// Get some information about the device
+    async fn get_info(&self, device: &Device) -> Result<InfoResponse, tonic::Status>;
+
+    /// Get all information as raw json about the device
+    async fn get_info_json(&self, device: &Device) -> Result<InfoJsonResponse, tonic::Status>;
+
+    /// Get the power and energy usage of the device
+    async fn get_usage(&self, device: &Device) -> Result<UsageResponse, tonic::Status>;
+
+    /// Power the device on
+    async fn power_on(&self, device: &Device) -> Result<PowerResponse, tonic::Status>;
+
+    /// Power the device off
+    async fn power_off(&self, device: &Device) -> Result<PowerResponse, tonic::Status>;
+
+    /// Set multiple properties of the device at once
+    async fn update(
+        &self,
+        device: &Device,
+        power: Option<bool>,
+        brightness: Option<u8>,
+        temperature: Option<u16>,
+        hue_saturation: Option<(u16, u8)>
+    ) -> Result<(), tonic::Status>;
+}
+
 pub trait TonicErrMap<R> {
+    /// Map a result to a result containing a tonic error
     fn map_tonic_err(self, spinner: &mut Option<Spinner>, json: bool) -> R;
 }
 
@@ -142,127 +174,29 @@ impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
         self.unwrap_or_else(|status| {
             let message = status.message();
             let code = status.code().to_string();
-            if json {
-                println!("{}", json!({ "message": message, "code": code }));
-            } else if spinner.is_some() {
-                spinner.fail(status.message());
-            } else {
-                error!("{}", status.message());
-            }
+            if json { println!("{}", json!({ "message": message, "code": code })); }
+            else if spinner.is_some() { spinner.fail(status.message()); }
+            else { error!("{}", status.message()); }
             exit(1)
         })
     }
 }
 
 pub trait TapoErrMap<R> {
-    async fn map_tapo_err(self, handler: &mut Device) -> Result<R, tonic::Status>;
+    async fn map_tapo_err(self, device: &Device) -> Result<R, tonic::Status>;
 }
 
 impl<R> TapoErrMap<R> for Result<R, tapo::Error> {
-    async fn map_tapo_err(self, device: &mut Device) -> Result<R, tonic::Status> {
-        match self {
-            Ok(data) => Ok(data),
-            Err(err) => {
-                match err {
-                    // there is a session timeout which didn't get caught by the optimistic session
-                    // validator. Forcefully refresh the session
-                    tapo::Error::Tapo(TapoResponseError::SessionTimeout) => {
-                        if let Some(error) = device.refresh_session().await.err() {
-                            Err(error)
-                        } else {
-                            Err(tonic::Status::unauthenticated(err.to_string()))
-                        }
-                    },
-                    _ => Err(tonic::Status::internal(err.to_string()))
-                }
+    async fn map_tapo_err(self, _device: &Device) -> Result<R, tonic::Status> {
+        self.map_err(|err| {
+            match err {
+                tapo::Error::Tapo(tapo_response_error) => tonic::Status::internal(format!("{tapo_response_error:?}")),
+                tapo::Error::Validation { field: _field, message } => tonic::Status::invalid_argument(message),
+                tapo::Error::Serde(error) => tonic::Status::internal(error.to_string()),
+                tapo::Error::Http(error) => tonic::Status::internal(error.to_string()),
+                tapo::Error::DeviceNotFound => tonic::Status::not_found(err.to_string()),
+                _ => tonic::Status::unknown(err.to_string()),
             }
-        }
-    }
-}
-
-
-impl Display for InfoResponse {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut lines = vec![];
-        if let Some(on) = &self.device_on {
-            let state = on.then_some("Turned on").unwrap_or("Turned off");
-            lines.push(format!("{}: {state}", "State".bold()))
-        }
-        let overheated = if self.overheated { "Overheated" } else { "Normal" };
-        lines.push(format!("{}: {overheated}", "Thermals".bold()));
-        if let Some(on_time) = &self.on_time {
-            lines.push(format!("{}: {}min", "Uptime".bold(), on_time / 60u64))
-        }
-        if let Some(temperature) = &self.temperature {
-            if temperature > &0 {
-                lines.push(format!("{}: {temperature}K", "Temperature".bold()))
-            }
-        }
-        if let Some(color) = &self.color {
-            let block = "  ".on_custom_color(CustomColor::new(u8::try_from(color.red).unwrap_or_default(), u8::try_from(color.green).unwrap_or_default(), u8::try_from(color.blue).unwrap_or_default()));
-            let color = Rgb::new(color.red as f64, color.green as f64, color.blue as f64, None).to_hex_string();
-            lines.push(format!("{}: {color} {block}", "Color".bold()));
-        }
-        if let Some(brightness) = &self.brightness {
-            lines.push(format!("{}: {brightness}%", "Brightness".bold()))
-        }
-        if let Some((hue, saturation)) = &self.hue.zip(self.saturation) {
-            lines.push(format!("{}: {hue}", "Hue".bold()));
-            lines.push(format!("{}: {saturation}%", "Saturation".bold()))
-        }
-        if let Some(effect_id) = &self.dynamic_effect_id {
-            lines.push(format!("{}: {effect_id}", "Effect".bold()))
-        }
-
-        f.write_str(lines.join("\n").as_str())
-    }
-}
-
-impl Display for UsageResponse {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut lines = vec![];
-        if let Some(time) = &self.time_usage {
-            let convert_time = |t| format!("{:.2}h", t as f32 / 60f32).into();
-            lines.push("Uptime:".underline().bold().to_string());
-            lines.push(format!("{}: {}", "Today".bold(), time.today.map_or("No information".dimmed(), convert_time)));
-            lines.push(format!("{}: {:.2}h", "Week".bold(), time.week.map_or("No information".dimmed(), convert_time)));
-            lines.push(format!("{}: {:.2}h", "Month".bold(), time.month.map_or("No information".dimmed(), convert_time)));
-        }
-        if let Some(power) = &self.power_usage {
-            if !lines.is_empty() {
-                lines.push(String::new());
-            }
-            let convert_power = |p: u64| format!("{:.3}kWh", p as f32 / 1000f32).into();
-            lines.push("Power used:".underline().bold().to_string());
-            lines.push(format!("{}: {}", "Today".bold(), power.today.map_or("No information".dimmed(), convert_power)));
-            lines.push(format!("{}: {:.3}kWh", "Week".bold(), power.week.map_or("No information".dimmed(), convert_power)));
-            lines.push(format!("{}: {:.3}kWh", "Month".bold(), power.month.map_or("No information".dimmed(), convert_power)));
-        }
-        if let Some(saved) = &self.saved_power {
-            if !lines.is_empty() {
-                lines.push(String::new());
-            }
-            let convert_power = |p: u64| format!("{:.3}kWh", p as f32 / 1000f32).into();
-            lines.push("Power saved:".underline().bold().to_string());
-            lines.push(format!("{}: {}", "Today".bold(), saved.today.map_or("No information".dimmed(), convert_power)));
-            lines.push(format!("{}: {:.3}kWh", "Week".bold(), saved.week.map_or("No information".dimmed(), convert_power)));
-            lines.push(format!("{}: {:.3}kWh", "Month".bold(), saved.month.map_or("No information".dimmed(), convert_power)));
-        }
-        f.write_str(lines.join("\n").as_str())
-    }
-}
-
-impl Display for rpc::Device {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut lines = vec![];
-        let status = match SessionStatus::try_from(self.status).unwrap_or_default() {
-            SessionStatus::Authenticated => "Authenticated",
-            SessionStatus::Failure => "Authentication failed",
-            SessionStatus::RepeatedFailure => "Authentication failed multiple times",
-        };
-        lines.push(format!("{}: {}", "Type".bold(), self.r#type));
-        lines.push(format!("{}: {}", "Session".bold(), status));
-        lines.push(format!("{}: {}", "Address".bold(), self.address));
-        f.write_str(lines.join("\n").as_str())
+        })
     }
 }

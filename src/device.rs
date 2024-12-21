@@ -5,8 +5,8 @@ use tapo::{ApiClient, ColorLightHandler, GenericDeviceHandler, LightHandler};
 use tonic::Status;
 use crate::config::{DeviceDefinition, SupportedDevice};
 use crate::tapo::server::{EventSender, rpc};
-use crate::tapo::server::rpc::{EventType};
-use crate::tapo::{create_event, transform_session_status};
+use crate::tapo::server::rpc::EventType;
+use crate::tapo::{create_event, TapoSessionStatusExt};
 
 const SESSION_VALIDITY_MILLIS: u64 = 60 * 60 * 1000; // 60 minutes
 const SESSION_REFRESH_RETRIES: u8 = 10; // after 10 failed session refresh attempts the session status can be set to RepeatedFailure
@@ -22,7 +22,7 @@ pub enum SessionStatus {
 pub struct Device {
     pub address: String,
     pub name: String,
-    pub r#type: SupportedDevice,
+    pub device_type: SupportedDevice,
     pub session_status: SessionStatus,
     client: ApiClient,
     next_session_action: SystemTime,
@@ -33,7 +33,7 @@ pub struct Device {
 
 impl Device {
     pub async fn new(name: String, definition: DeviceDefinition, client: ApiClient, sender: EventSender) -> Option<Self> {
-        let handler = Self::acquire_handler(&definition.r#type, &definition.address, client.clone()).await;
+        let handler = Self::acquire_handler(&definition.device_type, &definition.address, client.clone()).await;
 
         if let Err(err) = &handler {
             warn!("Unable to log into device '{name}': {err}. Retrying on next access...")
@@ -49,7 +49,7 @@ impl Device {
 
         Some(Self {
             refresh_retires: if handler.is_ok() { 0 } else { 1 },
-            r#type: definition.r#type,
+            device_type: definition.device_type,
             address: definition.address,
             session_status: if handler.is_ok() { SessionStatus::Authenticated } else { SessionStatus::Failure },
             handler: handler.ok(),
@@ -117,7 +117,7 @@ impl Device {
             }
         } else {
             debug!("Attempting initial session acquisition for device '{}'", self.name);
-            match Self::acquire_handler(&self.r#type, &self.address, self.client.clone()).await {
+            match Self::acquire_handler(&self.device_type, &self.address, self.client.clone()).await {
                 Ok(handler) => {
                     self.session_status = SessionStatus::Authenticated;
                     self.next_session_action = now + Duration::from_millis(SESSION_VALIDITY_MILLIS);
@@ -142,9 +142,9 @@ impl Device {
             debug!("Session status changed: {:?}", self.session_status);
             let device = rpc::Device {
                 name: self.name.clone(),
-                status: i32::from(transform_session_status(&self.session_status)),
+                status: self.session_status.rpc().into(),
                 address: self.address.clone(),
-                r#type: format!("{:?}", self.r#type)
+                r#type: self.device_type.to_string()
             };
 
             if let Err(err) = self.sender.send(create_event(EventType::DeviceAuthChange, device)) {

@@ -8,7 +8,7 @@ use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use rpc::tapo_server::Tapo;
 use crate::tapo::server::rpc::{DeviceRequest, DevicesResponse, Empty, EventRequest, EventResponse, InfoJsonResponse, InfoResponse, PowerResponse, SetRequest, UsageResponse};
 use crate::device::Device;
-use crate::tapo::{TapoRpcColorExt, TapoColorExt};
+use crate::tapo::TapoRpcColorExt;
 use crate::tapo::state::State;
 
 use super::{TapoDeviceExt, TapoSessionStatusExt};
@@ -245,7 +245,7 @@ impl Tapo for TapoService {
         // the provided color always takes predecence over hue, saturation and
         // temperature arguments
         if let Some(color) = &color {
-            let (h, s, t) = color.hst();
+            let (h, s, t) = color.get_color_config();
             if h > 0 {
                 temperature = None;
                 hue_saturation = Some((h, s));

@@ -84,11 +84,6 @@ pub trait TapoRpcColorExt {
     fn tapo_color(&self) -> tapo::requests::Color;
 }
 
-pub trait TapoColorExt {
-    /// Get the hue, saturation and temperature (kelvin) of the color
-    fn hst(&self) -> (u16, u8, u16);
-}
-
 pub trait TapoSessionStatusExt {
     /// Get the rpc representation of the session status
     fn rpc(&self) -> rpc::SessionStatus;

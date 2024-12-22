@@ -1981,7 +1981,7 @@ dependencies = [
 [[package]]
 name = "tapo"
 version = "0.8.0"
-source = "git+https://github.com/mihai-dinculescu/tapo#0c3396f8f371f659336676242ef163d0da932ab1"
+source = "git+https://github.com/mihai-dinculescu/tapo#da8684a0ede1cfd62878894d7777bfeccb55edf2"
 dependencies = [
  "aes",
  "anyhow",

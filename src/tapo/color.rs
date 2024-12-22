@@ -1,8 +1,7 @@
 use colorsys::Hsl;
-use tapo::requests::Color;
 use crate::tapo::server::rpc::Rgb;
 
-use super::{server::rpc::Color as RpcColor, TapoColorExt, TapoRpcColorExt};
+use super::{server::rpc::Color as RpcColor, TapoRpcColorExt};
 
 /// Convert either a kelvin temperature or a hsl value to a rgb value
 pub fn any_to_rgb(temperature: Option<u32>, hue: Option<u32>, saturation: Option<u32>, brightness: Option<u32>) -> Option<Rgb> {
@@ -99,54 +98,6 @@ impl TapoRpcColorExt for RpcColor {
             RpcColor::LightGreen => tapo::requests::Color::LightGreen,
             RpcColor::Lime => tapo::requests::Color::Lime,
             RpcColor::ForestGreen => tapo::requests::Color::ForestGreen,
-        }
-    }
-}
-
-impl TapoColorExt for Color {
-    fn hst(&self) -> (u16, u8, u16) {
-        match self {
-            Color::CoolWhite => (0, 100, 4000),
-            Color::Daylight => (0, 100, 5000),
-            Color::Ivory => (0, 100, 6000),
-            Color::WarmWhite => (0, 100, 3000),
-            Color::Incandescent => (0, 100, 2700),
-            Color::Candlelight => (0, 100, 2500),
-            Color::Snow => (0, 100, 6500),
-            Color::GhostWhite => (0, 100, 6500),
-            Color::AliceBlue => (208, 5, 0),
-            Color::LightGoldenrod => (54, 28, 0),
-            Color::LemonChiffon => (54, 19, 0),
-            Color::AntiqueWhite => (0, 100, 5500),
-            Color::Gold => (50, 100, 0),
-            Color::Peru => (29, 69, 0),
-            Color::Chocolate => (30, 100, 0),
-            Color::SandyBrown => (27, 60, 0),
-            Color::Coral => (16, 68, 0),
-            Color::Pumpkin => (24, 90, 0),
-            Color::Tomato => (9, 72, 0),
-            Color::Vermilion => (4, 77, 0),
-            Color::OrangeRed => (16, 100, 0),
-            Color::Pink => (349, 24, 0),
-            Color::Crimson => (348, 90, 0),
-            Color::DarkRed => (0, 100, 0),
-            Color::HotPink => (330, 58, 0),
-            Color::Smitten => (329, 67, 0),
-            Color::MediumPurple => (259, 48, 0),
-            Color::BlueViolet => (271, 80, 0),
-            Color::Indigo => (274, 100, 0),
-            Color::LightSkyBlue => (202, 46, 0),
-            Color::CornflowerBlue => (218, 57, 0),
-            Color::Ultramarine => (254, 100, 0),
-            Color::DeepSkyBlue => (195, 100, 0),
-            Color::Azure => (210, 100, 0),
-            Color::NavyBlue => (240, 100, 0),
-            Color::LightTurquoise => (180, 26, 0),
-            Color::Aquamarine => (159, 50, 0),
-            Color::Turquoise => (174, 71, 0),
-            Color::LightGreen => (120, 39, 0),
-            Color::Lime => (75, 100, 0),
-            Color::ForestGreen => (120, 75, 0),
         }
     }
 }

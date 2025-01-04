@@ -191,7 +191,7 @@ impl Tapo for TapoService {
                 info.temperature = Some(temperature as u32);
                 temperature
             })
-            .map(|value| max(min(value, 2500), 6500));
+            .map(|value| min(max(value, 2500), 6500));
 
         let brightness = inner.brightness
             .map(|change| {
@@ -205,7 +205,7 @@ impl Tapo for TapoService {
                 info.brightness = Some(brightness as u32);
                 brightness
             })
-            .map(|value| max(min(value, 1), 100));
+            .map(|value| min(max(value, 1), 100));
 
         let mut hue_saturation = inner.hue_saturation
             .map(|hs| {
@@ -221,7 +221,7 @@ impl Tapo for TapoService {
                         info.saturation = Some(saturation as u32);
                         saturation
                     })
-                    .map(|value| max(min(value, 1), 100));
+                    .map(|value| min(max(value, 1), 100));
 
                 let hue = hs.hue
                     .map(|change| {

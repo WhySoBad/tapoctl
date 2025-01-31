@@ -36,7 +36,18 @@ pub enum Commands {
     #[command(flatten)]
     Client(ClientCommand),
     #[command(flatten)]
-    Server(ServerCommand)
+    Server(ServerCommand),
+    #[command(flatten)]
+    Util(UtilCommand)
+}
+
+#[derive(Subcommand, Debug)]
+pub enum UtilCommand {
+    #[clap(hide = true)]
+    /// Create shell completions
+    Completions {
+        directory: String
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -106,13 +117,6 @@ pub enum ClientCommand {
     Reset {
         /// Device which should be reset
         device: String
-    },
-    #[clap(hide = true)]
-    /// Create shell completions
-    Completions {
-        directory: String,
-        #[arg(long, short)]
-        offline: bool
     }
 }
 

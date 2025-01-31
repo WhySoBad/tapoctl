@@ -29,7 +29,7 @@ build() {
 
     cargo build --frozen --release
 
-    cargo run --release -- completions $PWD/../completions --offline
+    cargo run --release -- completions $PWD/../completions
 }
 
 package() {

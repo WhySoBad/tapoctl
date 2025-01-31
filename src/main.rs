@@ -4,6 +4,7 @@ use std::process::exit;
 use std::str::FromStr;
 use clap::{Parser, ValueEnum};
 use clap_complete::{Generator, Shell};
+use cli::UtilCommand;
 use colored::Colorize;
 use serde_json::{json, Value};
 use spinoff::{Spinner, spinners};
@@ -39,6 +40,31 @@ async fn main() -> anyhow::Result<()> {
             match server_command {
                 ServerCommand::Serve { port } => {
                     start_server(port, server_config).await;
+                }
+            }
+        },
+        Commands::Util(util_command) => {
+            match util_command {
+                UtilCommand::Completions { directory } => {
+                    let path = Path::new(&directory);
+                    let exists = path.exists();
+                    if !exists {
+                        if let Err(err) = std::fs::create_dir_all(&directory) {
+                            println!("Failed to create completions directory at {directory}: {err}");
+                            return Ok(());
+                        };
+                    } else if !path.is_dir() {
+                        println!("Unable to write completions to {directory}. File exists but is not a directory!");
+                        return Ok(());
+                    }
+
+                    for shell in Shell::value_variants() {
+                        let completions = completions::generate_completions(*shell, "tapoctl");
+                        match std::fs::write(path.join(shell.file_name("tapoctl")), completions) {
+                            Ok(_) => println!("Successfully created completions for {}", shell.to_string()),
+                            Err(err) => println!("Error whilst writing completions file for {}: {err}", shell.to_string())
+                        }
+                    }
                 }
             }
         },
@@ -177,37 +203,6 @@ async fn main() -> anyhow::Result<()> {
                         println!("Finished subscription. Stream closed!")
                     }
                 },
-                ClientCommand::Completions { directory, offline } => {
-                    let path = Path::new(&directory);
-                    let exists = path.exists();
-                    if !exists {
-                        if let Err(err) = std::fs::create_dir_all(&directory) {
-                            spinner.fail(format!("Failed to create completions directory at {directory}: {err}").as_str());
-                            return Ok(());
-                        };
-                    } else if !path.is_dir() {
-                        spinner.fail(format!("Unable to write completions to {directory}. File exists but is not a directory!").as_str());
-                        return Ok(());
-                    }
-
-                    if !offline {
-                        let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner, json).into_inner();
-                        completions::save_device_completions(&devices.devices);
-                        spinner.success("Loaded devices");
-                    } else if exists {
-                        spinner.success("Found completions directory");
-                    } else {
-                        spinner.success("Created completions directory");
-                    }
-
-                    for shell in Shell::value_variants() {
-                        let completions = completions::generate_completions(*shell, "tapoctl");
-                        match std::fs::write(path.join(shell.file_name("tapoctl")), completions) {
-                            Ok(_) => println!("Successfully created completions for {}", shell.to_string()),
-                            Err(err) => println!("Error whilst writing completions file for {}: {err}", shell.to_string())
-                        }
-                    }
-                }
             }
         }
     }

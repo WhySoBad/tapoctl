@@ -29,7 +29,7 @@ build() {
 
     cargo build --frozen --release
 
-    cargo run --release -- completions $PWD/../completions
+    cargo run --release -- completions _completions
 }
 
 package() {
@@ -38,7 +38,7 @@ package() {
     install -Dm0755 "target/release/tapoctl" "$pkgdir/usr/bin/tapoctl"
 
 
-    install -Dm0644 "$PWD/../completions/tapoctl.bash" "$pkgdir/usr/share/bash-completion/completions/tapoctl"
-    install -Dm0644 "$PWD/../completions/tapoctl.fish" -t "$pkgdir/usr/share/fish/vendor_completions.d/"
-    install -Dm0644 "$PWD/../completions/_tapoctl" -t "$pkgdir/usr/share/zsh/site_functions/"
+    install -Dm0644 "_completions/tapoctl.bash" "$pkgdir/usr/share/bash-completion/completions/tapoctl"
+    install -Dm0644 "_completions/tapoctl.fish" -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+    install -Dm0644 "_completions/_tapoctl" -t "$pkgdir/usr/share/zsh/site_functions/"
 }

@@ -10,6 +10,11 @@ fn custom_validator(fn_name: &str) -> String {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    build_tonic()?;
+    Ok(())
+}
+
+fn build_tonic() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .type_attribute(".", SERDE_DERIVE)
         .type_attribute("tapo.Color", CLAP_ENUM)

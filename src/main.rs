@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::exit;
 use std::str::FromStr;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use clap_complete::{Generator, Shell};
 use colored::Colorize;
 use serde_json::{json, Value};
 use spinoff::{Spinner, spinners};
@@ -17,6 +19,7 @@ mod device;
 mod config;
 mod tapo;
 mod cli;
+mod completions;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -57,6 +60,8 @@ async fn main() -> anyhow::Result<()> {
             match client_command {
                 ClientCommand::Devices => {
                     let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner, json).into_inner();
+                    completions::save_device_completions(&devices.devices);
+
                     if json {
                         println!("{}", json!(devices))
                     } else if devices.devices.is_empty() {
@@ -170,6 +175,30 @@ async fn main() -> anyhow::Result<()> {
 
                     if !json {
                         println!("Finished subscription. Stream closed!")
+                    }
+                },
+                ClientCommand::Completions { directory } => {
+                    let path = Path::new(&directory);
+                    if !path.exists() {
+                        if let Err(err) = std::fs::create_dir_all(&directory) {
+                            spinner.fail(format!("Failed to create completions directory at {directory}: {err}").as_str());
+                            return Ok(());
+                        };
+                    } else if !path.is_dir() {
+                        spinner.fail(format!("Unable to write completions to {directory}. File exists but is not a directory!").as_str());
+                        return Ok(());
+                    }
+
+                    let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner, json).into_inner();
+                    completions::save_device_completions(&devices.devices);
+                    spinner.success("Loaded devices");
+
+                    for shell in Shell::value_variants() {
+                        let completions = completions::generate_completions(*shell, "tapoctl");
+                        match std::fs::write(path.join(shell.file_name("tapoctl")), completions) {
+                            Ok(_) => println!("Successfully created completions for {}", shell.to_string()),
+                            Err(err) => println!("Error whilst writing completions file for {}: {err}", shell.to_string())
+                        }
                     }
                 }
             }

@@ -106,6 +106,11 @@ pub enum ClientCommand {
     Reset {
         /// Device which should be reset
         device: String
+    },
+    #[clap(hide = true)]
+    /// Create shell completions
+    Completions {
+        directory: String
     }
 }
 

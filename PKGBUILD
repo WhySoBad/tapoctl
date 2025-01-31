@@ -37,7 +37,7 @@ package() {
 
     install -Dm0755 "target/release/tapoctl" "$pkgdir/usr/bin/tapoctl"
 
-    install -Dm0644 "completions/$_binary_name.bash" "$pkgdir/usr/share/bash-completion/completions/$_binary_name"
-    install -Dm0644 "completions/$_binary_name.fish" -t "$pkgdir/usr/share/fish/vendor_completions.d/"
-    install -Dm0644 "completions/_$_binary_name" -t "$pkgdir/usr/share/zsh/site_functions/"
+    install -Dm0644 "$PWD/../completions/tapoctl.bash" "$pkgdir/usr/share/bash-completion/completions/tapoctl"
+    install -Dm0644 "$PWD/../completions/tapoctl.fish" -t "$pkgdir/usr/share/fish/vendor_completions.d/"
+    install -Dm0644 "$PWD/../completions/_tapoctl" -t "$pkgdir/usr/share/zsh/site_functions/"
 }

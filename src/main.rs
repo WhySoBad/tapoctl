@@ -177,9 +177,10 @@ async fn main() -> anyhow::Result<()> {
                         println!("Finished subscription. Stream closed!")
                     }
                 },
-                ClientCommand::Completions { directory } => {
+                ClientCommand::Completions { directory, offline } => {
                     let path = Path::new(&directory);
-                    if !path.exists() {
+                    let exists = path.exists();
+                    if !exists {
                         if let Err(err) = std::fs::create_dir_all(&directory) {
                             spinner.fail(format!("Failed to create completions directory at {directory}: {err}").as_str());
                             return Ok(());
@@ -189,9 +190,15 @@ async fn main() -> anyhow::Result<()> {
                         return Ok(());
                     }
 
-                    let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner, json).into_inner();
-                    completions::save_device_completions(&devices.devices);
-                    spinner.success("Loaded devices");
+                    if !offline {
+                        let devices = client.devices(Empty {}).await.map_tonic_err(&mut spinner, json).into_inner();
+                        completions::save_device_completions(&devices.devices);
+                        spinner.success("Loaded devices");
+                    } else if exists {
+                        spinner.success("Found completions directory");
+                    } else {
+                        spinner.success("Created completions directory");
+                    }
 
                     for shell in Shell::value_variants() {
                         let completions = completions::generate_completions(*shell, "tapoctl");

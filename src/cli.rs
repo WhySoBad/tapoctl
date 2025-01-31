@@ -110,7 +110,9 @@ pub enum ClientCommand {
     #[clap(hide = true)]
     /// Create shell completions
     Completions {
-        directory: String
+        directory: String,
+        #[arg(long, short)]
+        offline: bool
     }
 }
 

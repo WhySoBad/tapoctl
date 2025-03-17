@@ -165,11 +165,12 @@ impl Device {
 
         debug!("Try session refresh: {:?} {:?}", now, self.next_session_action);
 
-        if now.ge(&self.next_session_action) {
-            self.refresh_session().await
-        } else {
-            Ok(())
-        }
+        // if now.ge(&self.next_session_action) {
+        //     self.refresh_session().await
+        // } else {
+        //     Ok(())
+        // }
+        Ok(())
     }
 
     /// Access the current device handler

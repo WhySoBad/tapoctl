@@ -99,6 +99,8 @@ message EventResponse {
   EventType type = 1;
   // Body for the event which can be serialized into different objects depending on the event type
   bytes body = 2;
+  // Name of the device should the event affect a device
+  optional string device = 3;
 }
 
 // Representation of a rgb color
@@ -133,8 +135,6 @@ message InfoResponse {
   optional string dynamic_effect_id = 8;
   // The rgb color of either the temperature or the hsl values
   optional Rgb color = 9;
-  // Name of the device
-  string name = 10;
 }
 
 // Response for the info json request. This response contains the whole device

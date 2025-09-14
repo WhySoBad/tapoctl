@@ -1,15 +1,30 @@
-use colorsys::Hsl;
 use crate::tapo::server::rpc::Rgb;
+use colorsys::Hsl;
 
 use super::{server::rpc::Color as RpcColor, TapoRpcColorExt};
 
 /// Convert either a kelvin temperature or a hsl value to a rgb value
-pub fn any_to_rgb(temperature: Option<u32>, hue: Option<u32>, saturation: Option<u32>, brightness: Option<u32>) -> Option<Rgb> {
-    if let Some((hue, saturation, brightness)) = hue.zip(saturation).zip(brightness).map(|((a, b), c)| (a, b, c)) {
+pub fn any_to_rgb(
+    temperature: Option<u32>,
+    hue: Option<u32>,
+    saturation: Option<u32>,
+    brightness: Option<u32>,
+) -> Option<Rgb> {
+    if let Some((hue, saturation, brightness)) = hue
+        .zip(saturation)
+        .zip(brightness)
+        .map(|((a, b), c)| (a, b, c))
+    {
         let hsl = Hsl::new(hue as f64, saturation as f64, brightness as f64, None);
         let rgb = colorsys::Rgb::from(hsl);
-        Some(Rgb { red: rgb.red().round() as u32, blue: rgb.blue().round() as u32, green: rgb.green().round() as u32 })
-    } else { temperature.map(kelvin_to_rgb) }
+        Some(Rgb {
+            red: rgb.red().round() as u32,
+            blue: rgb.blue().round() as u32,
+            green: rgb.green().round() as u32,
+        })
+    } else {
+        temperature.map(kelvin_to_rgb)
+    }
 }
 
 /// Convert a kelvin temperature value to an approximated rgb value
@@ -24,17 +39,17 @@ fn kelvin_to_rgb(temperature: u32) -> Rgb {
     } else {
         r = (temp as f64) - 60f64;
         r = 329.698727446 * r.powf(-329.698727446);
-        r = f64::max(f64::min(r, 255f64), 0f64);
+        r = r.clamp(0f64, 255f64);
     }
 
     if temp <= 66 {
         g = temp as f64;
         g = 99.4708025861 * g.ln() - 161.1195681661;
-        g = f64::max(f64::min(g, 255f64), 0f64);
+        g = g.clamp(0f64, 255f64);
     } else {
         g = temp as f64 - 60f64;
         g = 288.1221695283 * g.powf(-0.0755148492);
-        g = f64::max(f64::min(g, 255f64), 0f64);
+        g = g.clamp(0f64, 255f64);
     }
 
     if temp >= 66 {
@@ -44,7 +59,7 @@ fn kelvin_to_rgb(temperature: u32) -> Rgb {
     } else {
         b = temp as f64 - 10f64;
         b = 138.5177312231 * b.ln() - 305.0447927307;
-        b = f64::max(f64::min(b, 255f64), 0f64);
+        b = b.clamp(0f64, 255f64);
     }
 
     Rgb {

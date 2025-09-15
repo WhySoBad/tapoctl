@@ -81,8 +81,6 @@ message Device {
   string type = 2;
   // Ip address or hostname under which the device is accessible
   string address = 3;
-  // Status about the current session of the device (Authenticated, Refreshing, Error)
-  SessionStatus status = 4;
 }
 
 // The response of the devices request which returns all devices which were registered on the server.
@@ -99,6 +97,8 @@ message EventResponse {
   EventType type = 1;
   // Body for the event which can be serialized into different objects depending on the event type
   bytes body = 2;
+  // Name of the device should the event affect a device
+  optional string device = 3;
 }
 
 // Representation of a rgb color
@@ -133,8 +133,6 @@ message InfoResponse {
   optional string dynamic_effect_id = 8;
   // The rgb color of either the temperature or the hsl values
   optional Rgb color = 9;
-  // Name of the device
-  string name = 10;
 }
 
 // Response for the info json request. This response contains the whole device
@@ -168,23 +166,8 @@ message UsageResponse {
 
 // Types of events sent by the event stream
 enum EventType {
-  // The auth state of a device has changed
-  DeviceAuthChange = 0;
   // The internal state of a device has changed
-  DeviceStateChange = 1;
-}
-
-// Status information about the current session of a device
-enum SessionStatus {
-  // The current session is still active
-  Authenticated = 0;
-  // There was an error during session refreshing
-  Failure = 1;
-  // The session refresh didn't succeed multiple times in a row
-  //
-  // The device is assumed to be unreachable and therefore the next session refresh attempt will only occur after
-  // 10 minutes
-  RepeatedFailure = 2;
+  DeviceStateChange = 0;
 }
 
 // Enum representation of the Google Home colors

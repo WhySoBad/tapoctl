@@ -1,8 +1,8 @@
-use clap::{Args, Parser, Subcommand};
-use spinoff::Spinner;
-use spinoff::spinners::SpinnerFrames;
 use crate::config::Config;
 use crate::tapo::server::rpc::{Color, EventType, IntegerValueChange};
+use clap::{Args, Parser, Subcommand};
+use spinoff::spinners::SpinnerFrames;
+use spinoff::Spinner;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -28,7 +28,7 @@ pub struct Cli {
 
     /// Print result (if any) as json
     #[arg(long, short, default_value_t = false, global = true)]
-    pub json: bool
+    pub json: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -38,24 +38,27 @@ pub enum Commands {
     #[command(flatten)]
     Server(ServerCommand),
     #[command(flatten)]
-    Util(UtilCommand)
+    Util(UtilCommand),
 }
 
 #[derive(Subcommand, Debug)]
 pub enum UtilCommand {
     #[clap(hide = true)]
     /// Create shell completions
-    Completions {
-        directory: String
-    }
+    Completions { directory: String },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum ServerCommand {
     /// Start the grpc server
     Serve {
-        #[arg(value_parser = clap::value_parser!(u16).range(1..=65535))]
-        port: Option<u16>
+        /// TCP port to which the server should bind
+        #[arg(short, long, value_parser = clap::value_parser!(u16).range(1..=65535))]
+        port: Option<u16>,
+
+        /// Address on which the server should listen
+        #[arg(short, long)]
+        address: Option<String>
     },
 }
 
@@ -67,7 +70,7 @@ pub enum ClientCommand {
     Events {
         /// Event types to subscribe to
         /// When nothing specified all events are subscribed
-        types: Vec<EventType>
+        types: Vec<EventType>,
     },
     /// Update properties of a device
     Set {
@@ -116,8 +119,8 @@ pub enum ClientCommand {
     /// Reset a device to factory defaults
     Reset {
         /// Device which should be reset
-        device: String
-    }
+        device: String,
+    },
 }
 
 #[derive(Args, Clone, Debug)]
@@ -133,38 +136,44 @@ pub struct HueSaturation {
 }
 
 fn parse_360_value(s: &str) -> Result<IntegerValueChange, String> {
-    let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
+    let int = s
+        .parse()
+        .map_err(|_| format!("'{s}' is not a valid integer"))?;
     let relative = s.starts_with('+') || s.starts_with('-');
     if !relative && !(1..=360).contains(&int) {
         Err(format!("'{int}' is not in range 1 to 360"))?;
     }
     Ok(IntegerValueChange {
         absolute: !relative,
-        value: int
+        value: int,
     })
 }
 
 fn parse_100_value(s: &str) -> Result<IntegerValueChange, String> {
-    let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
+    let int = s
+        .parse()
+        .map_err(|_| format!("'{s}' is not a valid integer"))?;
     let relative = s.starts_with('+') || s.starts_with('-');
     if !relative && !(1..=100).contains(&int) {
         Err(format!("'{int}' is not in range 1 to 100"))?;
     }
     Ok(IntegerValueChange {
         absolute: !relative,
-        value: int
+        value: int,
     })
 }
 
 fn parse_kelvin_value(s: &str) -> Result<IntegerValueChange, String> {
-    let int = s.parse().map_err(|_| format!("'{s}' is not a valid integer"))?;
+    let int = s
+        .parse()
+        .map_err(|_| format!("'{s}' is not a valid integer"))?;
     let relative = s.starts_with('+') || s.starts_with('-');
     if !relative && !(2500..=6500).contains(&int) {
         Err(format!("'{int}' is not in range 2500 to 6500"))?;
     }
     Ok(IntegerValueChange {
         absolute: !relative,
-        value: int
+        value: int,
     })
 }
 

@@ -1,12 +1,13 @@
-use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
-use log::{error, info};
-use tonic::Status;
 use crate::device::{Device, DeviceHandler};
+use crate::event;
 use crate::tapo::color::any_to_rgb;
-use crate::tapo::create_event;
-use crate::tapo::server::EventSender;
 use crate::tapo::server::rpc::{EventType, InfoResponse};
+use crate::tapo::server::EventSender;
+use log::{error, info};
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::time::{Duration, SystemTime};
+use tonic::Status;
 
 const INFO_VALIDITY_MILLIS: u64 = 30 * 1000; // update device info after 30 seconds
 
@@ -19,12 +20,15 @@ pub struct State {
 #[derive(Clone)]
 pub struct DeviceInfo {
     response: InfoResponse,
-    created: SystemTime
+    created: SystemTime,
 }
 
 impl State {
     pub fn new(sender: EventSender) -> Self {
-        State { info: HashMap::new(), sender }
+        State {
+            info: HashMap::new(),
+            sender,
+        }
     }
 
     /// Manually populate the cached state information for a device
@@ -32,21 +36,22 @@ impl State {
     /// This is mainly used for the `set` endpoint where the new state is known without having to fetch it again
     pub fn update_info_optimistically(&mut self, device: String, info: InfoResponse) {
         if let Some(current) = self.info.get(&device) {
-            // nothing to do: the info is already up-to-date
-            if current.response.eq(&info) { return; }
+            if current.response.eq(&info) {
+                return;
+            }
         }
 
-        info!("Sending new device state event 2");
-        let event = create_event(EventType::DeviceStateChange, &info);
+        info!("Broadcasting state change event for device '{device}'");
+        let state_change_event = event! { EventType::DeviceStateChange, &info, device.clone() };
 
         let device_info = DeviceInfo {
             created: SystemTime::now(),
-            response: info
+            response: info,
         };
         self.info.insert(device, device_info);
 
-        if let Err(err) = self.sender.send(event) {
-            error!("Error whilst sending new device state: {err}")
+        if let Err(err) = self.sender.send(state_change_event) {
+            error!("Error whilst broadcasting new device state: {err}")
         }
     }
 
@@ -55,30 +60,32 @@ impl State {
     /// When `send_state` is set to `true` the refreshed info is sent as an update event to
     /// all subscribed clients. It should be set to `false` when the refresh is coming from
     /// a request which updates the state afterwards optimistically
-    pub async fn refresh_info(&mut self, device: &Device, send_state: bool) -> Result<InfoResponse, Status> {
-        let info = match device.get_handler()? {
+    pub async fn refresh_info(
+        &mut self,
+        device: &Device,
+        send_state: bool,
+    ) -> Result<InfoResponse, tapo::Error> {
+        let info = match device.get_handler().await?.deref() {
             DeviceHandler::Light(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await?;
                 InfoResponse {
                     brightness: Some(info.brightness as u32),
                     device_on: Some(info.device_on),
                     on_time: info.on_time,
                     overheated: info.overheated,
-                    name: device.name.clone(),
                     ..InfoResponse::default()
                 }
             }
             DeviceHandler::Generic(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await?;
                 InfoResponse {
                     device_on: info.device_on,
                     on_time: info.on_time,
-                    name: device.name.clone(),
                     ..InfoResponse::default()
                 }
             }
             DeviceHandler::ColorLight(handler) => {
-                let info = handler.get_device_info().await.map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await?;
                 let brightness = Some(info.brightness as u32);
                 let hue = info.hue.map(|v| v as u32);
                 let saturation = info.saturation.map(|v| v as u32);
@@ -93,16 +100,23 @@ impl State {
                     dynamic_effect_id: info.dynamic_light_effect_id,
                     overheated: info.overheated,
                     color: any_to_rgb(temperature, hue, saturation, brightness),
-                    name: device.name.clone()
                 }
             }
         };
 
         if send_state {
-            info!("Sending new device state event");
-            match self.sender.send(create_event(EventType::DeviceStateChange, &info)) {
-                Ok(_) => {},
-                Err(err) => error!("Error whilst sending new device state: {err}")
+            info!(
+                "Broadcasting state change event for device '{}'",
+                device.name
+            );
+            let state_change_event = event! {
+                EventType::DeviceStateChange,
+                &info,
+                device.name.clone()
+            };
+            match self.sender.send(state_change_event) {
+                Ok(_) => {}
+                Err(err) => error!("Error whilst broadcasting new device state: {err}"),
             }
         }
 
@@ -120,16 +134,24 @@ impl State {
         if let Some(info) = info {
             if info.created + Duration::from_millis(INFO_VALIDITY_MILLIS) < now {
                 // info is still valid
+                log::debug!("returning cached device information");
                 let mut copy = info.response.clone();
-                copy.on_time = copy.on_time.map(|time| time + now.duration_since(info.created).unwrap_or_default().as_secs());
-                return Ok(copy)
+                copy.on_time = copy.on_time.map(|time| {
+                    time + now
+                        .duration_since(info.created)
+                        .unwrap_or_default()
+                        .as_secs()
+                });
+                return Ok(copy);
             };
         };
 
-        // get refreshed device info from device handler
-        let response = self.refresh_info(device, true).await?;
-        self.info.insert(device.name.clone(), DeviceInfo { response: response.clone(), created: now });
-        Ok(response)
+        return Ok(InfoResponse::default());
+
+        // // get refreshed device info from device handler
+        // let response = self.refresh_info(device, true).await?;
+        // self.info.insert(device.name.clone(), DeviceInfo { response: response.clone(), created: now });
+        // Ok(response)
     }
 
     /// Get the current state for a device silently
@@ -138,7 +160,7 @@ impl State {
     /// should an expired state needs to be re-fetched. It should only be used when
     /// the state is updated optimistically later on to ensure the clients have the
     /// correct device states
-    pub async fn get_info_silent(&mut self, device: &Device) -> Result<InfoResponse, Status> {
+    pub async fn get_info_silent(&mut self, device: &Device) -> Result<InfoResponse, tapo::Error> {
         let info = self.info.get(&device.name);
 
         let now = SystemTime::now();
@@ -146,14 +168,25 @@ impl State {
             if info.created + Duration::from_millis(INFO_VALIDITY_MILLIS) < now {
                 // info is still valid
                 let mut copy = info.response.clone();
-                copy.on_time = copy.on_time.map(|time| time + now.duration_since(info.created).unwrap_or_default().as_secs());
-                return Ok(copy)
+                copy.on_time = copy.on_time.map(|time| {
+                    time + now
+                        .duration_since(info.created)
+                        .unwrap_or_default()
+                        .as_secs()
+                });
+                return Ok(copy);
             };
         };
 
         // get refreshed device info from device handler without sending an update event
         let response = self.refresh_info(device, false).await?;
-        self.info.insert(device.name.clone(), DeviceInfo { response: response.clone(), created: now });
+        self.info.insert(
+            device.name.clone(),
+            DeviceInfo {
+                response: response.clone(),
+                created: now,
+            },
+        );
         Ok(response)
     }
 }

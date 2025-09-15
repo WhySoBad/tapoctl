@@ -7,34 +7,34 @@ Control your tapo light bulbs from anywhere on your local network using the comm
 I wanted to control my tapo light bulbs from my local network but without the necessity of granting them access to my local network (or to the internet at all).
 Additionally, I wanted to be able to control by light bulbs from the command line.
 
-The idea behind this project is to create a [gRPC server](#server) which can be hosted on a local device (see [example setup with a Raspberry Pi](/example)) and which is connected 
+The idea behind this project is to create a [gRPC server](#server) which can be hosted on a local device (see [example setup with a Raspberry Pi](/example)) and which is connected
 to both your local network and the network containing the light bulbs. It then acts as a proxy and allows you to control
 your light bulbs from anywhere on your local network without using the proprietary app.
 
->[!NOTE]
+> [!NOTE]
 > You're still able to use the proprietary app if wanted as long as your smartphone is connected to the same wifi network as your light bulbs are
 
 Additionally, should the cli not meet your needs the use of protocol buffers allows a quick client implementation in any language.
 
 ## Features
 
-* Cli to control your tapo light bulbs
-* Offline control for your tapo light bulbs
-* gRPC server which allows easy client integration
+- Cli to control your tapo light bulbs
+- Offline control for your tapo light bulbs
+- gRPC server which allows easy client integration
 
 ## Supported devices
 
 The following tapo smart light bulbs are supported:
 
-* L530
-* L630
-* L510
-* L520
-* L610
-* Generic light bulbs with limited feature set
+- L530
+- L630
+- L510
+- L520
+- L610
+- Generic light bulbs with limited feature set
 
-> Since I only own some `L530` smart bulbs I can only test the `Generic` and `L530` type. The other light bulb types should work 
-as expected since the `L530` seems to have a superset of functionalities. 
+> Since I only own some `L530` smart bulbs I can only test the `Generic` and `L530` type. The other light bulb types should work
+> as expected since the `L530` seems to have a superset of functionalities.
 
 The provided feature and device support of tapoctl is based off the feature matrix of the [tapo crate](https://crates.io/crates/tapo) which is used internally.
 
@@ -45,26 +45,26 @@ If any functionality or your device is missing please open an issue or submit a 
 The cli supports the following commands:
 
 | Command          | Description                                                                         | Arguments                                                                                                                                                                                                                                                                                                                                  |
-|------------------|-------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ---------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `devices`        | List all devices registered on the server                                           |                                                                                                                                                                                                                                                                                                                                            |
 | `events`         | Subscribe to live events                                                            |                                                                                                                                                                                                                                                                                                                                            |
 | `set <device>`   | Update one or more properties of the light bulb                                     | `--brightness`: Brightness value between 1 and 100 <br> `--hue`: Hue value between 1 and 360 <br> `--saturation`: Saturation value between 1 and 100 <br> `--temperature`: Set color temperature to value between 2500K and 6500K <br> `--color`: Set predefined google home color <br> `--power`: Boolean whether to turn the lamp on/off |
 | `info <device>`  | Print current state of the light bulb                                               |                                                                                                                                                                                                                                                                                                                                            |
 | `usage <device>` | Print energy and time usage information for the light bulb                          |                                                                                                                                                                                                                                                                                                                                            |
 | `on <device>`    | Turn the device on                                                                  |                                                                                                                                                                                                                                                                                                                                            |
-| `off <device>`   | Turn the device off                                                                 |                                                                                                                                                                                                                                                                                                                                            | 
-| `reset <device>` | Reset the light bulb to factory defaults                                            |                                                                                                                                                                                                                                                                                                                                            | 
+| `off <device>`   | Turn the device off                                                                 |                                                                                                                                                                                                                                                                                                                                            |
+| `reset <device>` | Reset the light bulb to factory defaults                                            |                                                                                                                                                                                                                                                                                                                                            |
 | `serve`          | Start the gRPC server. More about this can be read in [the server section](#server) | `--port`: Port on which the server should listen                                                                                                                                                                                                                                                                                           |
 
 Additionally, there are some global arguments which work with all commands:
 
 | Argument    | Description                                                    |
-|-------------|----------------------------------------------------------------|
+| ----------- | -------------------------------------------------------------- |
 | `--config`  | Path to the configuration file which should be used            |
 | `--json`    | Print the response from the server as json should there be one |
 | `--address` | Address used for connecting to the gRPC server                 |
 | `--port`    | Port used for connecting to the gRPC server                    |
-| `--secure`  | Use https instead of http to connect to the gRPC server        |    
+| `--secure`  | Use https instead of http to connect to the gRPC server        |
 
 ### Configuration
 
@@ -73,6 +73,7 @@ By default, the configuration file is expected to be at `$HOME/.config/tapoctl/c
 The client configuration is used to persist options for connecting to a server whilst the server configuration is used to register devices on the server. The server configuration is documented [in the server section](#configuration-1) in detail.
 
 The following configuration is an example of a **client** configuration:
+
 ```toml
 # Connect to the server located at `10.10.10.10`
 address="10.10.10.10"
@@ -94,7 +95,7 @@ able to control the bulbs from your local network. More about this can be seen i
 
 ### Configuration
 
-Unlike the client configuration the server configuration is required for a server to be started. It contains your tapo account credentials. Those are needed for 
+Unlike the client configuration the server configuration is required for a server to be started. It contains your tapo account credentials. Those are needed for
 constructing the secret needed for interacting with the lamps. Under no circumstances are those credentials used to connect to any (remote) tapo servers.
 
 Additionally, you need to register your devices which then will be accessible through the gRPC api.
@@ -111,10 +112,11 @@ type="L530" # The device type of the light bulb (L530, L520, Generic, ...)
 address="10.255.255.10" # The address under which the device can be reached
 
 port=19191 # Optional port to listen on. Default: 19191
+address="0.0.0.0" # Optional address to listen on. Default: 0.0.0.0
 timeout=10000 # Optional timeout for requests to the tapo api in milliseconds. Default: 10000
 ```
 
->[!TIP]
+> [!TIP]
 > You can find the ip address of your device in the official tapo app or through a
 > [arp scan](https://linux.die.net/man/1/arp-scan) on the network your device is on
 >
@@ -136,12 +138,11 @@ docker run \
 When using docker compose the following configuration can be used:
 
 ```yaml
-version: '3.8'
-
 services:
   tapoctl:
     image: ghcr.io/whysobad/tapoctl
-    network_mode: host
+    ports:
+      - "19191:19191"
     volumes:
       - ./config:/home/tapo/.config/tapoctl/config.toml
 ```

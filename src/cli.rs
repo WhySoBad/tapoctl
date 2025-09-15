@@ -52,8 +52,13 @@ pub enum UtilCommand {
 pub enum ServerCommand {
     /// Start the grpc server
     Serve {
-        #[arg(value_parser = clap::value_parser!(u16).range(1..=65535))]
+        /// TCP port to which the server should bind
+        #[arg(short, long, value_parser = clap::value_parser!(u16).range(1..=65535))]
         port: Option<u16>,
+
+        /// Address on which the server should listen
+        #[arg(short, long)]
+        address: Option<String>
     },
 }
 

@@ -50,6 +50,8 @@ pub struct ServerConfig {
     pub devices: HashMap<String, DeviceDefinition>,
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "default_server_address")]
+    pub address: String,
     #[serde(default = "default_timeout")]
     pub timeout: u32,
 }
@@ -132,6 +134,10 @@ fn default_address() -> String {
 
 fn default_port() -> u16 {
     19191
+}
+
+fn default_server_address() -> String {
+    String::from("0.0.0.0")
 }
 
 fn default_timeout() -> u32 {

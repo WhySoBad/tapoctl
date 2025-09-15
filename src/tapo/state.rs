@@ -1,6 +1,6 @@
 use crate::device::{Device, DeviceHandler};
+use crate::event;
 use crate::tapo::color::any_to_rgb;
-use crate::tapo::create_event;
 use crate::tapo::server::rpc::{EventType, InfoResponse};
 use crate::tapo::server::EventSender;
 use log::{error, info};
@@ -36,14 +36,13 @@ impl State {
     /// This is mainly used for the `set` endpoint where the new state is known without having to fetch it again
     pub fn update_info_optimistically(&mut self, device: String, info: InfoResponse) {
         if let Some(current) = self.info.get(&device) {
-            // nothing to do: the info is already up-to-date
             if current.response.eq(&info) {
                 return;
             }
         }
 
-        info!("Sending new device state event 2");
-        let event = create_event(EventType::DeviceStateChange, &info, Some(device.clone()));
+        info!("Broadcasting state change event for device '{device}'");
+        let state_change_event = event! { EventType::DeviceStateChange, &info, device.clone() };
 
         let device_info = DeviceInfo {
             created: SystemTime::now(),
@@ -51,8 +50,8 @@ impl State {
         };
         self.info.insert(device, device_info);
 
-        if let Err(err) = self.sender.send(event) {
-            error!("Error whilst sending new device state: {err}")
+        if let Err(err) = self.sender.send(state_change_event) {
+            error!("Error whilst broadcasting new device state: {err}")
         }
     }
 
@@ -65,13 +64,10 @@ impl State {
         &mut self,
         device: &Device,
         send_state: bool,
-    ) -> Result<InfoResponse, Status> {
-        let info = match device.get_handler()?.deref() {
+    ) -> Result<InfoResponse, tapo::Error> {
+        let info = match device.get_handler().await?.deref() {
             DeviceHandler::Light(handler) => {
-                let info = handler
-                    .get_device_info()
-                    .await
-                    .map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await?;
                 InfoResponse {
                     brightness: Some(info.brightness as u32),
                     device_on: Some(info.device_on),
@@ -81,10 +77,7 @@ impl State {
                 }
             }
             DeviceHandler::Generic(handler) => {
-                let info = handler
-                    .get_device_info()
-                    .await
-                    .map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await?;
                 InfoResponse {
                     device_on: info.device_on,
                     on_time: info.on_time,
@@ -92,10 +85,7 @@ impl State {
                 }
             }
             DeviceHandler::ColorLight(handler) => {
-                let info = handler
-                    .get_device_info()
-                    .await
-                    .map_err(|err| Status::internal(err.to_string()))?;
+                let info = handler.get_device_info().await?;
                 let brightness = Some(info.brightness as u32);
                 let hue = info.hue.map(|v| v as u32);
                 let saturation = info.saturation.map(|v| v as u32);
@@ -115,14 +105,18 @@ impl State {
         };
 
         if send_state {
-            info!("Sending new device state event");
-            match self.sender.send(create_event(
+            info!(
+                "Broadcasting state change event for device '{}'",
+                device.name
+            );
+            let state_change_event = event! {
                 EventType::DeviceStateChange,
                 &info,
-                Some(device.name.clone()),
-            )) {
+                device.name.clone()
+            };
+            match self.sender.send(state_change_event) {
                 Ok(_) => {}
-                Err(err) => error!("Error whilst sending new device state: {err}"),
+                Err(err) => error!("Error whilst broadcasting new device state: {err}"),
             }
         }
 
@@ -166,7 +160,7 @@ impl State {
     /// should an expired state needs to be re-fetched. It should only be used when
     /// the state is updated optimistically later on to ensure the clients have the
     /// correct device states
-    pub async fn get_info_silent(&mut self, device: &Device) -> Result<InfoResponse, Status> {
+    pub async fn get_info_silent(&mut self, device: &Device) -> Result<InfoResponse, tapo::Error> {
         let info = self.info.get(&device.name);
 
         let now = SystemTime::now();

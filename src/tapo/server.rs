@@ -4,8 +4,7 @@ use crate::tapo::server::rpc::{
     InfoResponse, PowerResponse, SetRequest, UsageResponse,
 };
 use crate::tapo::state::State;
-use crate::tapo::TapoRpcColorExt;
-use futures::future::join_all;
+use crate::tapo::{TapoErrMap, TapoRpcColorExt};
 use rpc::tapo_server::Tapo;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,7 +12,7 @@ use tokio::sync::{RwLock, RwLockWriteGuard};
 use tonic::codegen::tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
-use super::{TapoDeviceExt, TapoSessionStatusExt};
+use super::TapoDeviceExt;
 
 pub mod rpc {
     tonic::include_proto!("tapo");
@@ -31,7 +30,7 @@ pub struct TapoService {
 }
 
 impl TapoService {
-    pub fn new(devices: HashMap<String, Arc<RwLock<Device>>>, channel: EventChannel) -> Self {
+    pub fn new(devices: HashMap<String, Device>, channel: EventChannel) -> Self {
         Self {
             devices: Arc::new(devices),
             state: Arc::new(RwLock::new(State::new(channel.0.clone()))),
@@ -39,9 +38,9 @@ impl TapoService {
         }
     }
 
-    async fn get_device_by_name(&self, name: &String) -> Result<Arc<RwLock<Device>>, Status> {
+    async fn get_device_by_name(&self, name: &String) -> Result<&Device, Status> {
         match self.devices.get(name) {
-            Some(dev) => Ok(dev.clone()),
+            Some(dev) => Ok(dev),
             None => Err(Status::not_found(format!(
                 "Device '{name}' could not be found"
             ))),
@@ -57,19 +56,13 @@ impl TapoService {
 impl Tapo for TapoService {
     /// Get a list of all devices available on the server
     async fn devices(&self, _: Request<Empty>) -> Result<Response<DevicesResponse>, Status> {
-        let map_async = self
+        let devices = self
             .devices
             .values()
-            .map(|dev| dev.read())
-            .collect::<Vec<_>>();
-        let devices = join_all(map_async)
-            .await
-            .into_iter()
             .map(|dev| rpc::Device {
                 name: dev.name.clone(),
                 r#type: dev.device_type.to_string(),
                 address: dev.address.clone(),
-                status: dev.session_status.rpc().into(),
             })
             .collect::<Vec<_>>();
 
@@ -115,10 +108,13 @@ impl Tapo for TapoService {
     async fn reset(&self, request: Request<DeviceRequest>) -> Result<Response<Empty>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
 
-        device.try_refresh_session().await?;
-        device.reset().await
+        device
+            .reset()
+            .await
+            .map(Response::new)
+            .map_tapo_err()
+            .await
     }
 
     /// Get some selected information about the device
@@ -128,10 +124,13 @@ impl Tapo for TapoService {
     ) -> Result<Response<InfoResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
 
-        device.try_refresh_session().await?;
-        device.get_info().await
+        device
+            .get_info()
+            .await
+            .map(Response::new)
+            .map_tapo_err()
+            .await
     }
 
     /// Get all raw json information about the device
@@ -141,10 +140,13 @@ impl Tapo for TapoService {
     ) -> Result<Response<InfoJsonResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
 
-        device.try_refresh_session().await?;
-        device.get_info_json().await
+        device
+            .get_info_json()
+            .await
+            .map(Response::new)
+            .map_tapo_err()
+            .await
     }
 
     /// Get power and time usage of the device
@@ -154,20 +156,26 @@ impl Tapo for TapoService {
     ) -> Result<Response<UsageResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
 
-        device.try_refresh_session().await?;
-        device.get_usage().await
+        device
+            .get_usage()
+            .await
+            .map(Response::new)
+            .map_tapo_err()
+            .await
     }
 
     /// Power the device on
     async fn on(&self, request: Request<DeviceRequest>) -> Result<Response<PowerResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
 
-        device.try_refresh_session().await?;
-        let response = device.on().await?;
+        let response = device
+            .on()
+            .await
+            .map(Response::new)
+            .map_tapo_err()
+            .await?;
 
         let mut info = self.get_state_mut().await.get_info(&device).await?;
         info.device_on = Some(true);
@@ -186,10 +194,13 @@ impl Tapo for TapoService {
     ) -> Result<Response<PowerResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
 
-        device.try_refresh_session().await?;
-        let response = device.off().await?;
+        let response = device
+            .off()
+            .await
+            .map(Response::new)
+            .map_tapo_err()
+            .await?;
 
         let mut info = self.get_state_mut().await.get_info(&device).await?;
         info.device_on = Some(false);
@@ -205,10 +216,14 @@ impl Tapo for TapoService {
     async fn set(&self, request: Request<SetRequest>) -> Result<Response<InfoResponse>, Status> {
         let inner = request.into_inner();
         let device = self.get_device_by_name(&inner.device).await?;
-        let mut device = device.write().await;
-        device.try_refresh_session().await?;
 
-        let mut info = self.get_state_mut().await.get_info_silent(&device).await?;
+        let mut info = self
+            .get_state_mut()
+            .await
+            .get_info_silent(&device)
+            .await
+            .map_tapo_err()
+            .await?;
 
         let mut temperature = inner
             .temperature
@@ -331,7 +346,11 @@ impl Tapo for TapoService {
 
         let response = device
             .set(info, power, brightness, temperature, hue_saturation)
+            .await
+            .map(Response::new)
+            .map_tapo_err()
             .await?;
+
         self.get_state_mut()
             .await
             .update_info_optimistically(device.name.clone(), response.get_ref().clone());

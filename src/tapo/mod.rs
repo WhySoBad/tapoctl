@@ -2,21 +2,17 @@ use crate::cli::SpinnerOpt;
 use crate::config::ServerConfig;
 use crate::device::Device;
 use crate::tapo::server::rpc::tapo_server::TapoServer;
-use crate::tapo::server::rpc::{EventResponse, EventType, InfoResponse, SessionStatus};
-use crate::tapo::server::{rpc, TapoService};
+use crate::tapo::server::rpc::InfoResponse;
+use crate::tapo::server::TapoService;
 use log::{error, info};
-use serde::Serialize;
 use serde_json::json;
 use server::rpc::{Empty, InfoJsonResponse, PowerResponse, UsageResponse};
 use spinoff::Spinner;
 use std::collections::HashMap;
 use std::process::exit;
-use std::sync::Arc;
 use std::time::Duration;
 use tapo::ApiClient;
-use tokio::sync::RwLock;
 use tonic::transport::Server;
-use tonic::Response;
 
 mod color;
 mod device;
@@ -25,13 +21,39 @@ pub mod server;
 mod state;
 mod validation;
 
-pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
+#[macro_export]
+macro_rules! event {
+    ($event_type:expr, $body:expr) => {{
+        let mut bytes = vec![];
+        serde_json::to_writer(&mut bytes, &$body).unwrap_or_default();
+        crate::tapo::server::rpc::EventResponse {
+            body: bytes,
+            r#type: i32::from($event_type),
+            device: None,
+        }
+    }};
+    ($event_type:expr, $body:expr, $device:expr) => {{
+        let mut bytes = vec![];
+        serde_json::to_writer(&mut bytes, &$body).unwrap_or_default();
+        crate::tapo::server::rpc::EventResponse {
+            body: bytes,
+            r#type: i32::from($event_type),
+            device: Some($device),
+        }
+    }};
+}
+
+pub async fn start_server(
+    port: Option<u16>,
+    address: Option<String>,
+    config: Option<ServerConfig>,
+) {
     let Some(config) = config else {
         error!("Please specify a server config for setting up the server");
         exit(1);
     };
 
-    let mut devices = HashMap::<String, Arc<RwLock<Device>>>::new();
+    let mut devices = HashMap::new();
     let (tx, rx) = tokio::sync::broadcast::channel(10);
 
     info!("Starting device login phase");
@@ -41,7 +63,7 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
         // causes blocking when sending requests for multiple devices in a short period of time
         let client = ApiClient::new(&config.auth.username, &config.auth.password)
             .with_timeout(Duration::from_millis(config.timeout as u64));
-        Device::new(name, definition, client, tx.clone())
+        Device::new(name, definition, client)
     });
 
     futures::future::join_all(devices_async)
@@ -49,44 +71,31 @@ pub async fn start_server(port: Option<u16>, config: Option<ServerConfig>) {
         .into_iter()
         .flatten()
         .for_each(|dev| {
-            devices.insert(dev.name.clone(), Arc::new(RwLock::new(dev)));
+            devices.insert(dev.name.clone(), dev);
         });
 
     info!("Finished device login phase");
 
     let port = port.unwrap_or(config.port);
+    let address = address.unwrap_or(config.address);
 
-    let format = format!("0.0.0.0:{port}");
-    let addr = match format.parse() {
+    let full_address = format!("{address}:{port}");
+    let addr = match full_address.parse() {
         Ok(addr) => addr,
         Err(_) => {
-            error!("'{format}' is not a valid socket address");
+            error!("'{full_address}' is not a valid socket address");
             exit(1)
         }
     };
 
     let svc = TapoServer::new(TapoService::new(devices, (tx, rx)));
-    info!("Starting server at {format}");
+    info!("Starting server at {full_address}");
     match Server::builder().add_service(svc).serve(addr).await {
         Ok(_) => info!("Stopped server"),
         Err(err) => {
-            error!("Unable to serve at {format}. Reason: {err}");
+            error!("Unable to serve at {full_address}: {err}");
             exit(1)
         }
-    }
-}
-
-pub fn create_event(
-    event_type: EventType,
-    body: impl Serialize,
-    device: Option<String>,
-) -> EventResponse {
-    let mut bytes = vec![];
-    serde_json::to_writer(&mut bytes, &body).unwrap_or_default();
-    EventResponse {
-        body: bytes,
-        r#type: i32::from(event_type),
-        device,
     }
 }
 
@@ -95,42 +104,27 @@ pub trait TapoRpcColorExt {
     fn tapo_color(&self) -> tapo::requests::Color;
 }
 
-pub trait TapoSessionStatusExt {
-    /// Get the rpc representation of the session status
-    fn rpc(&self) -> rpc::SessionStatus;
-}
-
-impl TapoSessionStatusExt for crate::device::SessionStatus {
-    fn rpc(&self) -> rpc::SessionStatus {
-        match self {
-            crate::device::SessionStatus::Authenticated => SessionStatus::Authenticated,
-            crate::device::SessionStatus::Failure => SessionStatus::Failure,
-            crate::device::SessionStatus::RepeatedFailure => SessionStatus::RepeatedFailure,
-        }
-    }
-}
-
 pub trait TapoDeviceExt {
     /// Refresh the session of the device
-    async fn refresh_session(&self) -> Result<Response<Empty>, tonic::Status>;
+    async fn refresh_session(&self) -> Result<Empty, tapo::Error>;
 
     /// Reset the device to factory defaults
-    async fn reset(&self) -> Result<Response<Empty>, tonic::Status>;
+    async fn reset(&self) -> Result<Empty, tapo::Error>;
 
     /// Get some information about the device
-    async fn get_info(&self) -> Result<Response<InfoResponse>, tonic::Status>;
+    async fn get_info(&self) -> Result<InfoResponse, tapo::Error>;
 
     /// Get all information as raw json about the device
-    async fn get_info_json(&self) -> Result<Response<InfoJsonResponse>, tonic::Status>;
+    async fn get_info_json(&self) -> Result<InfoJsonResponse, tapo::Error>;
 
     /// Get the power and energy usage of the device
-    async fn get_usage(&self) -> Result<Response<UsageResponse>, tonic::Status>;
+    async fn get_usage(&self) -> Result<UsageResponse, tapo::Error>;
 
     /// Power the device on
-    async fn on(&self) -> Result<Response<PowerResponse>, tonic::Status>;
+    async fn on(&self) -> Result<PowerResponse, tapo::Error>;
 
     /// Power the device off
-    async fn off(&self) -> Result<Response<PowerResponse>, tonic::Status>;
+    async fn off(&self) -> Result<PowerResponse, tapo::Error>;
 
     /// Set multiple properties of the device at once
     async fn set(
@@ -140,7 +134,7 @@ pub trait TapoDeviceExt {
         brightness: Option<u8>,
         temperature: Option<u16>,
         hue_saturation: Option<(u16, u8)>,
-    ) -> Result<Response<InfoResponse>, tonic::Status>;
+    ) -> Result<InfoResponse, tapo::Error>;
 }
 
 pub trait TapoDeviceHandlerExt {
@@ -195,19 +189,14 @@ impl<R> TonicErrMap<R> for Result<R, tonic::Status> {
 }
 
 pub trait TapoErrMap<R> {
-    async fn map_tapo_err(self, device: &Device) -> Result<R, tonic::Status>;
+    async fn map_tapo_err(self) -> Result<R, tonic::Status>;
 }
 
 impl<R> TapoErrMap<R> for Result<R, tapo::Error> {
-    async fn map_tapo_err(self, _device: &Device) -> Result<R, tonic::Status> {
+    async fn map_tapo_err(self) -> Result<R, tonic::Status> {
         self.map_err(|err| match err {
-            tapo::Error::Tapo(tapo_response_error) => {
-                tonic::Status::internal(format!("{tapo_response_error:?}"))
-            }
-            tapo::Error::Validation {
-                field: _field,
-                message,
-            } => tonic::Status::invalid_argument(message),
+            tapo::Error::Tapo(error) => tonic::Status::internal(error.to_string()),
+            tapo::Error::Validation { message, .. } => tonic::Status::invalid_argument(message),
             tapo::Error::Serde(error) => tonic::Status::internal(error.to_string()),
             tapo::Error::Http(error) => tonic::Status::internal(error.to_string()),
             tapo::Error::DeviceNotFound => tonic::Status::not_found(err.to_string()),

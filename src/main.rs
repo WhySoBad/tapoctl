@@ -2,7 +2,7 @@ use crate::cli::{Cli, ClientCommand, Commands, ServerCommand, SpinnerOpt};
 use crate::config::{ClientConfig, Config};
 use crate::tapo::server::rpc::tapo_client::TapoClient;
 use crate::tapo::server::rpc::{
-    Device, DeviceRequest, Empty, EventRequest, EventType, HueSaturation, InfoResponse, SetRequest,
+    DeviceRequest, Empty, EventRequest, EventType, HueSaturation, InfoResponse, SetRequest,
 };
 use crate::tapo::start_server;
 use crate::tapo::TonicErrMap;
@@ -40,8 +40,8 @@ async fn main() -> anyhow::Result<()> {
                 _ => None,
             };
             match server_command {
-                ServerCommand::Serve { port } => {
-                    start_server(port, server_config).await;
+                ServerCommand::Serve { port, address } => {
+                    start_server(port, address, server_config).await;
                 }
             }
         }
@@ -253,16 +253,6 @@ async fn main() -> anyhow::Result<()> {
                                 println!(
                                     "{}\n{body}\n",
                                     format!("Device '{}' changed:", event.device())
-                                        .bold()
-                                        .underline()
-                                );
-                            }
-                            Ok(EventType::DeviceAuthChange) => {
-                                let body: Device =
-                                    serde_json::from_slice(event.body.as_slice()).unwrap();
-                                println!(
-                                    "{}\n{body}\n",
-                                    format!("Auth changed for device '{}':", event.device())
                                         .bold()
                                         .underline()
                                 );

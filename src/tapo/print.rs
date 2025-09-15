@@ -129,13 +129,7 @@ impl Display for UsageResponse {
 impl Display for rpc::Device {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut lines = vec![];
-        let status = match rpc::SessionStatus::try_from(self.status).unwrap_or_default() {
-            rpc::SessionStatus::Authenticated => "Authenticated",
-            rpc::SessionStatus::Failure => "Authentication failed",
-            rpc::SessionStatus::RepeatedFailure => "Authentication failed multiple times",
-        };
         lines.push(format!("{}: {}", "Type".bold(), self.r#type));
-        lines.push(format!("{}: {}", "Session".bold(), status));
         lines.push(format!("{}: {}", "Address".bold(), self.address));
         f.write_str(lines.join("\n").as_str())
     }

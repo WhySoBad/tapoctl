@@ -1,4 +1,4 @@
-FROM rust:alpine3.19 as builder
+FROM rust:alpine3.22 AS builder
 ARG TARGETPLATFORM
 
 WORKDIR /app
@@ -16,7 +16,7 @@ RUN CARGO_BUILD_TARGET=$([ "$TARGETPLATFORM" = "arm" ] && echo "aarch64-unknown-
 COPY . .
 RUN cargo build --release
 
-FROM alpine:3.19 as runner
+FROM alpine:3.22 AS runner
 ARG TARGETPLATFORM
 
 RUN apk add --no-cache musl-dev openssl-dev openssl protoc gcc

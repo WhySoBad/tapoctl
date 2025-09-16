@@ -24,6 +24,7 @@ macro_rules! call_device_handlers {
             DeviceHandler::Generic($handler) => $expr,
         };
         if result.is_session_timeout() {
+            log::warn!("Session for device '{}' expired, attempting refresh", $device.name);
             $device.refresh_session().await?;
             result = match $device.get_handler().await?.$deref_type() {
                 DeviceHandler::ColorLight($handler) => $expr,
